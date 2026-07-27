@@ -1,0 +1,138 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Unit tests create no VMs, so they run anywhere Go runs.
+        # macos-latest is arm64; ubuntu-latest is amd64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check formatting
+        run: |
+          out="$(gofmt -l -s .)"
+          if [ -n "$out" ]; then
+            echo "these files need gofmt -s:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -timeout 10m
+
+      - name: Test with the race detector
+        run: go test -race ./... -timeout 15m
+
+  build-matrix:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -o /dev/null .
+
+  examples:
+    name: validate examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.9.*"
+          terraform_wrapper: false
+
+      - name: Build the provider
+        run: go build -o terraform-provider-lima .
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive ./examples
+
+      - name: Validate every example against the built provider
+        run: |
+          cat > /tmp/devrc <<TFRC
+          provider_installation {
+            dev_overrides {
+              "guidoiaquinti/lima" = "${GITHUB_WORKSPACE}"
+            }
+            direct {}
+          }
+          TFRC
+          export TF_CLI_CONFIG_FILE=/tmp/devrc
+          status=0
+          for dir in $(find examples -name '*.tf' -exec dirname {} \; | sort -u); do
+            echo "==> $dir"
+            if ! (cd "$dir" && terraform validate -no-color); then
+              status=1
+            fi
+          done
+          exit $status

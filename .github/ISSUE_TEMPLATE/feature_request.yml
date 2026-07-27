@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a capability
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check `ROADMAP.md` first. Several capabilities are deliberately
+        out of scope, with the reasoning recorded there.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not just the proposed feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed configuration
+      description: What would the HCL look like?
+      render: hcl
+
+  - type: textarea
+    id: lima-support
+    attributes:
+      label: Which limactl command supports this?
+      description: |
+        The provider only does what `limactl` supports non-interactively. If
+        there is a command or documented workflow behind this, naming it makes
+        the request far easier to act on.
+    validations:
+      required: true

@@ -1,0 +1,74 @@
+name: GitHub workflows
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/**
+      - .github/actionlint.yaml
+
+# As we don't have an unlimited amount of GitHub action minutes, let's
+# cancel any currently running job or workflow in the same concurrency group
+# if a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download and verify actionlint
+        # curl --fail makes an HTTP/network error a hard failure instead of silently
+        # producing a truncated file; --retry survives the kind of transient blip that
+        # previously surfaced as a cryptic "gzip: unexpected end of file" downstream.
+        # Verifying the published checksum also catches a corrupted-but-complete download.
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_arm64.tar.gz"
+          base_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --max-time 60 \
+            -o "$asset" "${base_url}/${asset}"
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --max-time 30 \
+            -o checksums.txt "${base_url}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+
+          grep " ${asset}\$" checksums.txt | sha256sum -c -
+          tar -xzf "$asset" actionlint
+
+      - name: Run actionlint
+        run: ./actionlint -color -ignore shellcheck
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+
+      - name: Run zizmor
+        env:
+          ZIZMOR_VERSION: 1.28.0
+        run: uvx --from "zizmor==${ZIZMOR_VERSION}" zizmor --persona=pedantic --collect=workflows .

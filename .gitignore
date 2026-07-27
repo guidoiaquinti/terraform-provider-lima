@@ -1,0 +1,24 @@
+# Build artifacts
+/terraform-provider-lima
+/dist/
+coverage.out
+*.test
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+crash.log
+crash.*.log
+
+# Local development overrides
+.terraformrc
+terraform.rc
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,4 +1,4 @@
-# terraform-provider-lima
+# Terraform provider for Lima
 
 This Terraform / OpenTofu provider allows managing local
 [Lima](https://lima-vm.io/) virtual machines declaratively.
@@ -177,10 +177,10 @@ scattered through resource code.
 
 | Platform      | Unit tests | Acceptance tests            | Notes                                             |
 | ------------- | ---------- | --------------------------- | ------------------------------------------------- |
-| macOS arm64   | CI         | verified locally            | The development platform; `vz` backend.            |
+| macOS arm64   | CI         | verified locally            | `vz` backend. No hosted runner can nest `vz`.      |
 | Linux amd64   | CI         | CI, every pull request      | `qemu` backend. See below.                         |
 | Linux arm64   | CI         | CI, every pull request      | `qemu` backend, on a free arm64 runner.            |
-| macOS amd64   | CI         | CI, weekly and on demand    | `vz` backend, on a large Intel runner.             |
+| macOS amd64   | CI         | CI, every pull request      | `vz` backend.                                      |
 | Windows       | not run    | not applicable              | Lima supports WSL2; the provider is untested there.|
 
 Unit tests need no VM and run on any platform.
@@ -194,10 +194,9 @@ Linux + QEMU job runs on every pull request, on both `ubuntu-24.04` and
 two Linux jobs differ in more than host CPU: a different QEMU system emulator,
 a different EFI firmware package, and a different guest image per template.
 
-The macOS + `vz` job is different: Apple-silicon hosted runners are themselves
-virtual machines and cannot nest Virtualization.framework, so `vz` needs a
-*large* Intel runner (`macos-15-large`), which is billed. That job is therefore
-weekly and on demand, and the Linux jobs carry the per-PR signal.
+The macOS + `vz` job runs on every pull request as well. Apple-silicon hosted
+runners are themselves virtual machines and cannot nest
+Virtualization.framework, so the `vz` job runs on an Intel macOS runner.
 
 Linux and macOS are not redundant — `vz` and `qemu` are different Lima drivers.
 The acceptance suite derives the backend and its mount paths from `limactl info`
@@ -271,28 +270,6 @@ downtime, but the disk and its data survive.
 Everything else forces replacement because Lima offers no way to change it on
 an existing instance that the provider could apply and then verify. See
 [`docs/resources/instance.md`](docs/resources/instance.md#why-the-remaining-attributes-still-replace).
-
-## Disks
-
-`lima_disk` manages additional disks, which exist independently of instances:
-
-```hcl
-resource "lima_disk" "data" {
-  name = "project-data"
-  size = "50GiB"
-}
-
-resource "lima_instance" "dev" {
-  name             = "project-dev"
-  template         = "template:ubuntu"
-  additional_disks = [lima_disk.data.name]
-}
-```
-
-Lima locks a disk while the instance holding it is **running**, and refuses to
-resize or delete it. The provider surfaces that rather than stopping your
-instance for you, and never calls `limactl disk unlock` — it cannot tell a
-stale lock from a live one.
 
 ## Importing
 

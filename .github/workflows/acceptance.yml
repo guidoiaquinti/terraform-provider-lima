@@ -1,0 +1,206 @@
+name: acceptance
+
+# Acceptance tests create real virtual machines.
+#
+# The upstream Lima project runs its own VM integration tests on standard
+# GitHub-hosted runners, which is the evidence this workflow is modelled on.
+# From a recent lima-vm/lima `test.yml` run:
+#
+#   Integration tests (QEMU, Linux host) (alpine.yaml)   7.7 min   ubuntu-24.04
+#   Integration tests (vz) (default.yaml)               18.6 min   macos-15-large
+#
+# Every job below runs on every pull request. The Linux + QEMU job runs on
+# amd64 and arm64, both of which are free runner classes for public
+# repositories. The macOS + vz job needs an Intel runner, because
+# Apple-silicon hosted runners are themselves VMs and cannot nest
+# Virtualization.framework.
+#
+# The Linux and macOS jobs exercise genuinely different code paths: `vz` on
+# macOS and `qemu` on Linux are different Lima drivers. The suite derives the
+# backend from `limactl info` rather than hardcoding one.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_pattern:
+        description: "go test -run pattern"
+        required: false
+        default: "TestAcc"
+  schedule:
+    # Weekly, Monday 04:00 UTC — picks up Lima releases that break us.
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A short LIMA_HOME: Lima builds unix socket paths as
+  # <LIMA_HOME>/<name>/ssh.sock.<16 digits> and enforces UNIX_PATH_MAX=104.
+  LIMA_PROVIDER_ACC_HOME: /tmp/ltfci
+
+jobs:
+  linux-qemu:
+    name: acceptance (linux/${{ matrix.arch }}, qemu)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both Linux runner classes are free for public repositories, so the
+          # arm64 job runs per-PR alongside amd64. They differ in more than the
+          # host CPU: a different QEMU system emulator, a different EFI
+          # firmware package, and a different guest image for every template.
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            lima_asset: Linux-x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu_packages: qemu-system-arm qemu-utils qemu-efi-aarch64
+            lima_asset: Linux-aarch64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.9.*"
+          terraform_wrapper: false
+
+      - name: Install QEMU
+        # The package list goes through the environment rather than being
+        # interpolated into the script, so the shell never sees expanded
+        # workflow-expression text as code.
+        env:
+          QEMU_PACKAGES: ${{ matrix.qemu_packages }}
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: this is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends $QEMU_PACKAGES
+
+      - name: Install Lima
+        env:
+          LIMA_VERSION: v2.2.0
+          LIMA_ASSET: ${{ matrix.lima_asset }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/lima.tar.gz \
+            "https://github.com/lima-vm/lima/releases/download/${LIMA_VERSION}/lima-${LIMA_VERSION#v}-${LIMA_ASSET}.tar.gz"
+          sudo tar -C /usr/local -xzf /tmp/lima.tar.gz
+          limactl --version
+
+      - name: Report host capabilities
+        run: |
+          limactl info | head -c 2000
+          echo
+          # Whether /dev/kvm is present decides between hardware acceleration
+          # and TCG emulation, which is the difference between a fast job and
+          # a slow one. Recorded so a timeout has an obvious first suspect.
+          if [ -e /dev/kvm ]; then
+            echo "KVM: present"; ls -l /dev/kvm
+          else
+            echo "KVM: absent - QEMU will fall back to software emulation"
+          fi
+
+      - name: Run acceptance tests
+        env:
+          TF_ACC: "1"
+          # workflow_dispatch input, so attacker-controllable in principle:
+          # passed as an environment value and quoted, never interpolated into
+          # the script text.
+          RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
+        run: |
+          go test ./internal/provider/ \
+            -run "$RUN_PATTERN" \
+            -v -timeout 80m
+
+      - name: Clean up any leftover instances and disks
+        if: always()
+        env:
+          LIMA_HOME: /tmp/ltfci
+        run: |
+          # Instances first: a running instance holds a lock on any disk it
+          # has attached, so disks cannot be removed until it is gone.
+          for name in $(limactl list -q 2>/dev/null); do
+            echo "removing leftover instance $name"
+            limactl unprotect "$name" || true
+            limactl delete --tty=false --force "$name" || true
+          done
+          for disk in $(limactl disk list --json 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p'); do
+            echo "removing leftover disk $disk"
+            limactl disk delete "$disk" || true
+          done
+          rm -rf /tmp/ltfci
+
+  macos-vz:
+    name: acceptance (macos, vz)
+    # Intel runner. Apple-silicon hosted runners are themselves VMs and cannot
+    # nest Virtualization.framework, so vz cannot be tested there.
+    runs-on: macos-15-large
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.9.*"
+          terraform_wrapper: false
+
+      - name: Install Lima
+        run: |
+          brew install lima
+          limactl --version
+
+      - name: Report host capabilities
+        run: limactl info | head -c 2000
+
+      - name: Run acceptance tests
+        env:
+          TF_ACC: "1"
+          RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
+        run: |
+          go test ./internal/provider/ \
+            -run "$RUN_PATTERN" \
+            -v -timeout 110m
+
+      - name: Clean up any leftover instances and disks
+        if: always()
+        env:
+          LIMA_HOME: /tmp/ltfci
+        run: |
+          for name in $(limactl list -q 2>/dev/null); do
+            echo "removing leftover instance $name"
+            limactl unprotect "$name" || true
+            limactl delete --tty=false --force "$name" || true
+          done
+          for disk in $(limactl disk list --json 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p'); do
+            echo "removing leftover disk $disk"
+            limactl disk delete "$disk" || true
+          done
+          rm -rf /tmp/ltfci

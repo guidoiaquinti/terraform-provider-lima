@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# No workflow-level permissions: the one job that needs write asks for it
+# itself, so a step added to some future job starts from nothing.
+permissions: {}
+
+concurrency:
+  # Two releases of the same tag must never run at once — they would race to
+  # create the same GitHub release. Not cancel-in-progress: a half-published
+  # release is worse than a queued one.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    name: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # GoReleaser creates the release and uploads its assets
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # GoReleaser needs the full history and all tags for the changelog.
+          fetch-depth: 0
+          # GoReleaser authenticates with GITHUB_TOKEN from the environment,
+          # so the checkout credentials are dead weight in a job that handles
+          # a signing key.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          # Caching is off in the release job deliberately: a release builds
+          # the artifacts users install, and a cache is writable by any
+          # workflow run on a branch, which makes it a poisoning route into a
+          # signed build. The cold build costs a minute; releases are rare.
+          cache: false
+
+      - name: Import the GPG signing key
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6.3.0
+        id: import_gpg
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
