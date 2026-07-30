@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
-	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -50,10 +49,12 @@ const (
 )
 
 // Ensure the implementation satisfies the framework interfaces.
-var (
-	_ provider.Provider              = (*limaProvider)(nil)
-	_ provider.ProviderWithFunctions = (*limaProvider)(nil)
-)
+//
+// Deliberately not provider.ProviderWithFunctions: the provider ships no
+// provider-defined functions, and asserting the interface to return nil
+// advertises a capability that resolves to an empty set. Add the assertion
+// back together with the first real function.
+var _ provider.Provider = (*limaProvider)(nil)
 
 type limaProvider struct {
 	// version is set at build time and reported to Terraform.
@@ -342,10 +343,6 @@ func (p *limaProvider) DataSources(context.Context) []func() datasource.DataSour
 		NewHostDataSource,
 		NewDiskDataSource,
 	}
-}
-
-func (p *limaProvider) Functions(context.Context) []func() function.Function {
-	return nil
 }
 
 // stringOrEnv returns the configured value, falling back to an environment

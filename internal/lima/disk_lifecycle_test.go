@@ -93,6 +93,11 @@ func TestDiskServiceResize(t *testing.T) {
 			fake := testutil.NewFakeLimactl()
 			fake.SeedDisk(testutil.FakeDisk{Name: "data", Size: tc.current})
 			if tc.attachedTo != "" {
+				// The holder has to exist and be running for Lima to report the
+				// disk as in use: the lock belongs to a live VM, not to the
+				// attachment. Seeding only the attachment described a state
+				// Lima cannot be in.
+				fake.Seed(testutil.FakeInstance{Name: tc.attachedTo, Status: "Running"})
 				fake.AttachDisk("data", tc.attachedTo)
 			}
 			svc := newDiskService(t, fake)
@@ -140,6 +145,7 @@ func TestDiskServiceResizeInUseNamesTheInstance(t *testing.T) {
 	// hunting for it.
 	fake := testutil.NewFakeLimactl()
 	fake.SeedDisk(testutil.FakeDisk{Name: "data", Size: 1 << 30})
+	fake.Seed(testutil.FakeInstance{Name: "project-dev", Status: "Running"})
 	fake.AttachDisk("data", "project-dev")
 	svc := newDiskService(t, fake)
 
@@ -182,6 +188,7 @@ func TestDiskServiceDelete(t *testing.T) {
 		t.Parallel()
 		fake := testutil.NewFakeLimactl()
 		fake.SeedDisk(testutil.FakeDisk{Name: "data", Size: 1 << 30})
+		fake.Seed(testutil.FakeInstance{Name: "dev", Status: "Running"})
 		fake.AttachDisk("data", "dev")
 		svc := newDiskService(t, fake)
 

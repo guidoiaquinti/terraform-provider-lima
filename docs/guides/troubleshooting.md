@@ -1,0 +1,276 @@
+---
+page_title: "Troubleshooting"
+subcategory: "Guides"
+description: |-
+  What the provider's error messages mean, and what to do about each one.
+---
+<!--
+  GENERATED FILE - DO NOT EDIT.
+
+  Source: templates/guides/troubleshooting.md.tmpl
+  Regenerate: make docs      (make docs-check fails if this file disagrees)
+
+  This page has no <no value> — it is entirely narrative. Every entry
+  below corresponds to a real diagnostic in internal/provider, and most are
+  covered by a test asserting the wording stays useful.
+-->
+
+# Troubleshooting
+
+This provider drives `limactl` as a subprocess, so a failure is usually Lima
+telling the provider something rather than the provider malfunctioning. Each
+entry below names the diagnostic you will see, what causes it, and what to do.
+
+**First, always:** run the equivalent `limactl` command by hand. If it fails the
+same way, the problem is in Lima or in the VM definition, not in the provider,
+and belongs at [lima-vm/lima](https://github.com/lima-vm/lima/issues).
+
+## Unsupported Lima version
+
+```text
+Error: Unsupported Lima version
+```
+
+Lima 2.0 or newer is required, and the check runs at provider configuration time
+so this arrives before anything is created rather than midway through an apply.
+
+The floor is a support decision, not a known incompatibility: the provider is
+neither tested nor exercised against the 1.x line, so accepting it would claim
+support that nothing verifies. Upgrade Lima, or pin an older provider release if
+one supported your version.
+
+A **newer** than tested Lima produces a warning instead, never an error, so
+upgrading Lima cannot break a working configuration.
+
+## Unable to locate the limactl executable
+
+```text
+Error: Unable to locate the limactl executable
+```
+
+The provider runs `limactl` on the machine executing `terraform apply`. It does
+not connect to anything remote — see [Remote hosts](#remote-hosts) below.
+
+Either install Lima, or point the provider at the binary:
+
+```hcl
+provider "lima" {
+  binary = "/opt/homebrew/bin/limactl"
+}
+```
+
+or set `LIMA_PROVIDER_BINARY`. Explicit configuration always wins over the
+environment.
+
+## Unable to determine the Lima version
+
+```text
+Error: Unable to determine the Lima version
+```
+
+A binary was found and executed, but its `--version` output could not be parsed.
+This is a different problem from a missing binary: something is on the path under
+that name and it is not `limactl`. Run it by hand:
+
+```console
+$ limactl --version
+```
+
+## An instance already exists
+
+```text
+Error: Unable to create Lima instance "dev"
+An instance with that name already exists in ...
+```
+
+The VM exists but Terraform does not know about it. Adopt it instead of
+recreating it:
+
+```console
+$ terraform import lima_instance.example dev
+```
+
+The import ID is the **real** Lima instance name, including any `name_prefix`.
+See the import section of
+[`lima_instance`](../resources/instance.md) for what import populates and what it
+deliberately leaves unset.
+
+## Unable to delete a protected instance
+
+```text
+Error: Unable to delete protected Lima instance "dev"
+```
+
+Lima's deletion protection is on, and the provider will not remove it for you —
+doing so automatically would defeat the entire purpose of the flag.
+
+Two remedies. Prefer the first, which keeps the operation inside Terraform:
+
+```hcl
+resource "lima_instance" "dev" {
+  protect = false
+}
+```
+
+Apply that, then destroy. Or clear it directly:
+
+```console
+$ limactl unprotect dev
+```
+
+## A disk is in use
+
+```text
+Error: Unable to delete Lima disk "data"
+The disk "data" is held by running instance "holder".
+```
+
+Lima locks a disk while the instance holding it is **running**, and the provider
+does not stop somebody else's instance to get around that. Note that "in use"
+means running, not merely attached: a disk attached to a stopped instance is
+free.
+
+Stop the holder first — set `start = false` on it and apply, or run
+`limactl stop holder` — then destroy or resize the disk.
+
+`limactl disk unlock` exists and the provider deliberately never calls it: it
+cannot distinguish a stale lock from a live one, and forcing a lock open under a
+running VM risks the disk's contents.
+
+## A disk cannot be shrunk
+
+```text
+Error: ... cannot shrink ...
+```
+
+Lima cannot shrink a disk. This is rejected at plan time rather than relayed from
+Lima mid-apply, so the message can name both sizes. Create a new, smaller disk
+and migrate the data.
+
+## The instance name is too long
+
+An instance name is bounded by more than its own character limit. Lima builds
+unix socket paths as `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` and the kernel
+enforces `UNIX_PATH_MAX` = 104 bytes, so:
+
+```text
+len(LIMA_HOME) + len(name) + 27 < 104
+```
+
+The provider checks this at plan time, including for the default `~/.lima`, so
+the failure arrives before an apply starts. Shorten the name, or point `home` at
+a shorter path:
+
+```hcl
+provider "lima" {
+  home = "/tmp/lima"
+}
+```
+
+## Port forwards or mounts appear to do nothing
+
+If the configuration sets `plain: true` in `config` or `config_overrides`, Lima
+ignores mounts and port forwarding outright and never starts the guest agent that
+implements forwarding. Nothing fails — the settings simply have no effect, and
+the only symptom is a service you cannot reach from the host.
+
+The provider warns about this combination at plan time. Remove `plain: true`, or
+drop the mounts and forwards it makes inert.
+
+## A resize restarted my instance
+
+Expected, and unavoidable: Lima refuses to edit a running instance, so changing
+`cpus`, `memory`, `disk`, `mounts` or `port_forwards` stops the VM, applies the
+edit, and starts it again. Expect brief downtime, not data loss — the disk and
+its contents survive.
+
+If the restart fails after a successful edit, the provider records the **new**
+values in state and reports the instance as stopped, because that is what is
+true. The next plan will not propose a change that has already happened.
+
+## Provisioning did not re-run
+
+`provisions` scripts run during instance creation only. Lima offers no supported
+way to re-run them on an existing instance, and does not record which ones ran,
+so the provider can neither detect that a script changed nor apply a new one to a
+live VM. Changing `provisions` therefore replaces the instance.
+
+`rerun_token` exists precisely because replacement is the only mechanism
+available: change it to force one deliberately.
+
+## Several instances fail when created at once
+
+Fixed, but worth knowing if you see it on an older build. Lima generates its
+shared SSH keypair on first use in `<LIMA_HOME>/_config/user` by shelling out to
+`ssh-keygen` with no locking, so concurrent first-time creates into an empty home
+raced. The provider now serialises creates until one has succeeded, after which
+they run concurrently again.
+
+The loser's message contains `already exists` — referring to the keypair, not to
+any instance — so an older provider misreported it as a name collision and
+advised importing an instance that did not exist.
+
+## Guest IP addresses are not available
+
+Deliberately not exposed. Guest addresses are not reliable across Lima's
+networking modes, so the provider reports forwarded host endpoints instead: use
+`ssh_address` and `ssh_port`, or a `port_forwards` entry, and connect via the
+host.
+
+Note that `ssh_address` and `ssh_port` on a **stopped** instance are last-known
+values, not proof of a live endpoint — Lima keeps reporting them after a stop.
+
+## Remote hosts
+
+Not supported. The provider is local-only: `limactl` must be present on the
+machine running `terraform apply`, which means it cannot run in a normal
+remote-execution pipeline such as Terraform Cloud.
+
+Remote Lima hosts over SSH are on the [roadmap][roadmap]; only the command
+adapter would change, but it needs a transport abstraction and a security model
+for remote execution first.
+
+## Leftover VMs after an interrupted test run
+
+Only relevant if you run the acceptance suite. `Ctrl-C` during `make testacc`
+skips every registered cleanup, leaving real VMs and a `LIMA_HOME` under `/tmp`.
+
+```console
+$ make sweep                    # the LIMA_HOME the suite uses
+$ make sweep SWEEP_HOME=/tmp/x  # a specific one
+$ make sweep-tmp                # every leftover acceptance home under /tmp
+```
+
+The sweep removes instances before disks, because a running instance holds a lock
+on anything attached to it, and it refuses to run against Lima's default
+`~/.lima` — where your real machines live.
+
+## Getting more detail
+
+Terraform's log level reaches the provider, and the provider logs every command
+it runs:
+
+```console
+$ TF_LOG=DEBUG terraform apply
+```
+
+Environment **values** are never logged, only keys, and values for keys matching
+`TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `KEY`, `CREDENTIAL` or `AUTH` are
+redacted — matched as a substring of the uppercased key, so `LIMA_TOKEN` and
+`MY_API_KEY` both count. YAML
+parse errors are stripped of the source excerpt the YAML library would otherwise
+include, because `config` and `config_overrides` may contain credentials.
+
+## Still stuck
+
+Open a [discussion][discussions] rather than an issue if you have not isolated
+the problem to the provider. If you have, an
+[issue][issues] with the provider version, the Lima version, your host platform
+and a reproducing configuration is very welcome.
+
+For a suspected vulnerability, please use a [private advisory][advisory] instead.
+
+[roadmap]: https://github.com/guidoiaquinti/terraform-provider-lima/blob/main/ROADMAP.md
+[discussions]: https://github.com/guidoiaquinti/terraform-provider-lima/discussions/categories/q-a
+[issues]: https://github.com/guidoiaquinti/terraform-provider-lima/issues/new/choose
+[advisory]: https://github.com/guidoiaquinti/terraform-provider-lima/security/advisories/new

@@ -1,0 +1,76 @@
+---
+page_title: "lima_instances Data Source - terraform-provider-lima"
+subcategory: ""
+description: |-
+  Reads every Lima instance in LIMA_HOME.
+---
+<!--
+  GENERATED FILE - DO NOT EDIT.
+
+  Source: templates/data-sources/instances.md.tmpl
+  Regenerate: make docs      (make docs-check fails if this file disagrees)
+
+  The attribute reference comes from the provider schema, so it cannot drift
+  from the code. The narrative around it is hand-written in the template.
+-->
+
+# lima_instances (Data Source)
+
+Reads **every** Lima instance in `LIMA_HOME`, whether or not Terraform manages
+it. This data source never modifies anything.
+
+`lima_host` also reports instance names — but only the names. This reports the
+full state of each instance, using the same attributes as the `lima_instance`
+data source.
+
+## Example usage
+
+```hcl
+data "lima_instances" "all" {}
+
+# Filter with an ordinary Terraform expression.
+output "running" {
+  value = [for i in data.lima_instances.all.instances : i.name if i.status == "running"]
+}
+
+output "total_memory_bytes" {
+  value = sum([for i in data.lima_instances.all.instances : parseint(i.memory, 10)])
+}
+```
+
+There are deliberately **no filter arguments**. A Terraform expression filters a
+list better than a bespoke argument could, and every filter attribute would be
+another thing to keep consistent with `lima_instance`.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Timeouts
+
+- `read` — default `2m`
+
+Setting the provider's `default_timeout` overrides it.
+
+```hcl
+data "lima_instances" "all" {
+  timeouts = {
+    read = "30s"
+  }
+}
+```
+
+## Names and `name_prefix`
+
+Names here are the **real** Lima instance names, exactly as `limactl list`
+reports them. The provider's `name_prefix` is not applied or stripped, because
+this data source reports instances it does not manage alongside those it does.
+
+To find only the instances a prefix covers, filter on it:
+
+```hcl
+output "ours" {
+  value = [
+    for i in data.lima_instances.all.instances : i.name
+    if startswith(i.name, "acme-")
+  ]
+}
+```

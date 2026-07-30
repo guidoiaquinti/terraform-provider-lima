@@ -1,0 +1,123 @@
+name: security
+
+# Supply-chain and static-analysis gates.
+#
+# Deliberately a separate workflow from `test`. These jobs answer "is what we
+# depend on safe" rather than "does our code work", they have different trigger
+# needs (a vulnerability can be published on a day nobody pushes, so this runs
+# on a schedule), and two of the three need permissions the test workflow must
+# never hold.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 05:00 UTC — an hour after the acceptance sweep, so a
+    # dependency advisory and a Lima regression do not land in the same digest.
+    - cron: "0 5 * * 1"
+
+# No workflow-level permissions: each job asks for exactly what it needs, so a
+# job added later starts from nothing.
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The workflow never pushes; leaving the token in .git/config would
+          # let any later step, or an uploaded artifact, carry it away.
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # govulncheck is the one gate here that works on any repository, public or
+      # private, with no GitHub Advanced Security entitlement. It is also the
+      # most precise of the three for a Go project: it reports only advisories
+      # whose vulnerable symbols this code actually reaches, so a hit is
+      # normally real work rather than a dependency-tree coincidence.
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          repo-checkout: false
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    # CodeQL is free for public repositories; on a private one it requires a
+    # GitHub Advanced Security entitlement and the job errors out. Gating on
+    # visibility means this skips cleanly today and starts working the moment
+    # the repository is made public — which it must be to publish to the
+    # Terraform Registry anyway. A missing context evaluates false, so the
+    # failure mode is "skipped", never "errored".
+    if: github.event.repository.private == false
+    permissions:
+      contents: read
+      security-events: write # uploading the SARIF results
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@bce182f857edf1feab116e9795a3393d21977282 # v4
+        with:
+          languages: go
+          # security-extended adds the lower-precision security queries. Worth
+          # it here: the provider's whole job is executing a subprocess and
+          # writing files a user's configuration names, which is exactly the
+          # shape the extra queries look at.
+          queries: security-extended
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@bce182f857edf1feab116e9795a3393d21977282 # v4
+        with:
+          category: "/language:go"
+
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    # Pull requests only: the action diffs the dependency manifest between base
+    # and head, so there is nothing for it to compare on a push or a schedule.
+    # Same visibility gate as CodeQL — it needs the dependency graph, which is
+    # a GHAS feature on private repositories.
+    if: github.event_name == 'pull_request' && github.event.repository.private == false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Fail the pull request on a moderate-or-worse advisory in anything it
+          # adds. Low severity is reported but does not block: Dependabot
+          # already opens a pull request for those, and blocking on them trains
+          # people to merge past the gate.
+          fail-on-severity: moderate
+          # A provider inherits the licence obligations of what it links. GPL
+          # incompatibility is the case that actually bites, and it is silent
+          # until someone audits a release.
+          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later, LGPL-2.0-or-later
+          comment-summary-in-pr: on-failure

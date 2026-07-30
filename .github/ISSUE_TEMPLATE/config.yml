@@ -1,7 +1,26 @@
+# Blank issues stay enabled: a report that fits neither template is better filed
+# freely than not filed. The contact links below route the kinds of report that
+# do not belong in this tracker at all.
+#
+# The Q&A link depends on GitHub Discussions being enabled and on the `q-a`
+# category existing; both are, as of the commit that added this file. If
+# Discussions is ever turned off, remove the entry rather than leaving a dead
+# route in the issue chooser.
 blank_issues_enabled: true
 contact_links:
+  - name: Question, or help with a configuration
+    url: https://github.com/guidoiaquinti/terraform-provider-lima/discussions/categories/q-a
+    about: >
+      Issues are for defects a maintainer can act on. If you are asking how to
+      do something, or your stack does not come up and you have not isolated
+      why, please start a discussion instead.
   - name: Lima itself
     url: https://github.com/lima-vm/lima/issues
     about: >
       For problems that reproduce when running limactl directly, please report
       them to the Lima project. This provider is an unaffiliated wrapper.
+  - name: Security vulnerability
+    url: https://github.com/guidoiaquinti/terraform-provider-lima/security/advisories/new
+    about: >
+      Please report suspected vulnerabilities privately rather than in a public
+      issue. See SECURITY.md for what is in scope.

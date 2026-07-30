@@ -317,8 +317,13 @@ func (f *FakeLimactl) GetDisk(name string) (FakeDisk, bool) {
 	return *d, true
 }
 
-// AttachDisk marks a disk as held by a running instance, which is what Lima
-// reports only while the instance is actually running.
+// AttachDisk records that a disk belongs to an instance.
+//
+// Attachment alone does not make the disk appear in use. Lima reports a disk as
+// held only while the named instance exists and is running, so a caller wanting
+// the in-use state must also Seed that instance with status Running. Attaching
+// to an instance that was never seeded describes a state Lima cannot be in, and
+// the disk will read as free.
 func (f *FakeLimactl) AttachDisk(diskName, instanceName string) *FakeLimactl {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -364,11 +369,45 @@ func (f *FakeLimactl) diskList() (string, string, int, error) {
 
 	var b strings.Builder
 	for _, n := range names {
-		j, _ := json.Marshal(f.disks[n])
+		reported := *f.disks[n]
+		// Lima reports `instance` only while a holder is actually running, so
+		// the field is derived here rather than replayed from what AttachDisk
+		// stored. See liveHolder.
+		reported.Instance = f.liveHolder(f.disks[n])
+		if reported.Instance == "" {
+			reported.InstanceDir = ""
+		}
+		j, _ := json.Marshal(reported)
 		b.Write(j)
 		b.WriteByte('\n')
 	}
 	return b.String(), "", 0, nil
+}
+
+// liveHolder returns the instance currently holding a disk, or empty.
+//
+// Lima's `instance` field on a disk means "in use right now", not "attached
+// to": it is populated while the holding instance is running and empty
+// otherwise. Storing it statically at attach time made two things impossible
+// that really happen — deleting the holder, and stopping it — because the disk
+// stayed locked forever against an instance that was gone. That is not a
+// hypothetical: it is what the sweep ordering test hit, and a sweep is precisely
+// the operation that deletes a holder and then its disks.
+//
+// The caller must hold f.mu.
+func (f *FakeLimactl) liveHolder(d *FakeDisk) string {
+	if d.Instance == "" {
+		return ""
+	}
+	holder, ok := f.instances[d.Instance]
+	if !ok {
+		// The holder was deleted; Lima releases the lock with it.
+		return ""
+	}
+	if !strings.EqualFold(holder.Status, "Running") {
+		return ""
+	}
+	return d.Instance
 }
 
 func (f *FakeLimactl) diskCreate(args []string) (string, string, int, error) {
@@ -417,8 +456,10 @@ func (f *FakeLimactl) diskDelete(args []string) (string, string, int, error) {
 		// Lima exits 0 for an absent disk.
 		return "", warn(fmt.Sprintf("Ignoring non-existent disk `%s`", name)), 0, nil
 	}
-	if d.Instance != "" {
-		return "", fatal(fmt.Sprintf("cannot delete disk `%s` in use by instance `%s`", name, d.Instance)), 1, nil
+	// Same liveness rule as the listing: a lock belongs to a running holder, so
+	// a disk whose holder was deleted or stopped is deletable.
+	if holder := f.liveHolder(d); holder != "" {
+		return "", fatal(fmt.Sprintf("cannot delete disk `%s` in use by instance `%s`", name, holder)), 1, nil
 	}
 	delete(f.disks, name)
 	return "", info(fmt.Sprintf("Deleted disk `%s`", name)), 0, nil

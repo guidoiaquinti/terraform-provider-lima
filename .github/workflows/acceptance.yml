@@ -2,22 +2,38 @@ name: acceptance
 
 # Acceptance tests create real virtual machines.
 #
-# The upstream Lima project runs its own VM integration tests on standard
-# GitHub-hosted runners, which is the evidence this workflow is modelled on.
-# From a recent lima-vm/lima `test.yml` run:
+# The upstream Lima project runs its own VM integration tests on GitHub-hosted
+# runners, which is the evidence this workflow is modelled on. From a recent
+# lima-vm/lima `test.yml` run, the Linux QEMU integration suite took 7.7 minutes
+# on a standard `ubuntu-24.04` runner.
 #
-#   Integration tests (QEMU, Linux host) (alpine.yaml)   7.7 min   ubuntu-24.04
-#   Integration tests (vz) (default.yaml)               18.6 min   macos-15-large
+# EVERY JOB HERE RUNS ON A FREE RUNNER CLASS. That is a deliberate constraint,
+# not an accident of what happened to be available:
 #
-# Every job below runs on every pull request. The Linux + QEMU job runs on
-# amd64 and arm64, both of which are free runner classes for public
-# repositories. The macOS + vz job needs an Intel runner, because
-# Apple-silicon hosted runners are themselves VMs and cannot nest
-# Virtualization.framework.
+#   ubuntu-24.04       free for public repositories
+#   ubuntu-24.04-arm   free for public repositories since January 2025
 #
-# The Linux and macOS jobs exercise genuinely different code paths: `vz` on
-# macOS and `qemu` on Linux are different Lima drivers. The suite derives the
-# backend from `limactl info` rather than hardcoding one.
+# There is deliberately no macOS job, and it is worth recording why so nobody
+# adds one back expecting it to be free.
+#
+# Lima's `vz` driver is Virtualization.framework, which needs hardware
+# virtualisation. GitHub's Apple-silicon runners are themselves virtual machines
+# and cannot nest it, so `vz` requires an Intel macOS runner — and every Intel
+# macOS runner class (`macos-*-large`) is a *larger* runner, which GitHub bills
+# even for public repositories. Upstream Lima runs all of its macOS jobs,
+# including QEMU-on-macOS, on `macos-15-large` for exactly this reason: there is
+# no free GitHub runner on which Lima can boot a VM on macOS.
+#
+# So macOS coverage is split rather than dropped:
+#
+#   Unit tests        run on macos-latest in test.yml (free, and they need no VM)
+#   vz acceptance     run locally by the maintainer — see README, "Acceptance
+#                     testing", which documents the command
+#
+# The Linux jobs are not a substitute for `vz` and are not pretended to be:
+# `vz` and `qemu` are different Lima drivers. The suite derives the backend and
+# its mount paths from `limactl info` rather than hardcoding either, so the same
+# tests do run on both — just not both in CI.
 
 on:
   pull_request:
@@ -47,7 +63,7 @@ env:
 
 jobs:
   linux-qemu:
-    name: acceptance (linux/${{ matrix.arch }}, qemu)
+    name: acceptance (linux/${{ matrix.arch }}, qemu, ${{ matrix.cli }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -62,10 +78,24 @@ jobs:
             runner: ubuntu-24.04
             qemu_packages: qemu-system-x86 qemu-utils ovmf
             lima_asset: Linux-x86_64
+            cli: terraform
+          # OpenTofu against real VMs, on amd64 only. The README claims
+          # OpenTofu support and nothing exercised it; this is the job that
+          # makes the claim true. Deliberately not replicated across every
+          # arch and backend: what differs between the two CLIs is the plugin
+          # protocol handshake and the test harness's provider address, none
+          # of which is architecture-dependent, whereas each added VM job
+          # costs ~8 minutes of runner time on every pull request.
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            lima_asset: Linux-x86_64
+            cli: opentofu
           - arch: arm64
             runner: ubuntu-24.04-arm
             qemu_packages: qemu-system-arm qemu-utils qemu-efi-aarch64
             lima_asset: Linux-aarch64
+            cli: terraform
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -79,9 +109,23 @@ jobs:
           cache: true
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: matrix.cli == 'terraform'
         with:
-          terraform_version: "1.9.*"
+          terraform_version: "latest"
           terraform_wrapper: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: matrix.cli == 'opentofu'
+        with:
+          tofu_version: "latest"
+          tofu_wrapper: false
+          # Sets TF_ACC_TERRAFORM_PATH, TF_ACC_PROVIDER_HOST and
+          # TF_ACC_PROVIDER_NAMESPACE for us. Doing it by hand is where the
+          # registry host is easy to get wrong: terraform-plugin-testing
+          # defaults to registry.terraform.io, and a provider address that does
+          # not match what tofu resolves fails with a confusing "provider not
+          # found" rather than an obvious misconfiguration.
+          provider_acceptance_tests: true
 
       - name: Install QEMU
         # The package list goes through the environment rather than being
@@ -127,80 +171,28 @@ jobs:
           # the script text.
           RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
         run: |
+          # -count=1 defeats the build cache. Go keys a cached test result on
+          # the environment variables the test read, so a run that only flips a
+          # variable the suite never inspects can be served from cache and
+          # reported green without a VM ever being created. For a suite whose
+          # entire value is that it touched real hardware, a cached pass is
+          # worse than no run at all.
           go test ./internal/provider/ \
             -run "$RUN_PATTERN" \
+            -count=1 \
             -v -timeout 80m
 
       - name: Clean up any leftover instances and disks
         if: always()
-        env:
-          LIMA_HOME: /tmp/ltfci
-        run: |
-          # Instances first: a running instance holds a lock on any disk it
-          # has attached, so disks cannot be removed until it is gone.
-          for name in $(limactl list -q 2>/dev/null); do
-            echo "removing leftover instance $name"
-            limactl unprotect "$name" || true
-            limactl delete --tty=false --force "$name" || true
-          done
-          for disk in $(limactl disk list --json 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p'); do
-            echo "removing leftover disk $disk"
-            limactl disk delete "$disk" || true
-          done
-          rm -rf /tmp/ltfci
+        # `make sweep` replaces what used to be an inline shell loop here. Two
+        # reasons: it was extracting disk names from JSON with a sed expression
+        # that silently matched nothing if Lima reordered its keys, and the
+        # ordering rule it depended on (instances before disks) lived only in a
+        # comment. Both now live in lima.Sweep, which is unit-tested, and the
+        # sweep refuses Lima's default home so a misconfigured LIMA_HOME here
+        # cannot reach a real machine's VMs.
+        run: make sweep SWEEP_HOME=/tmp/ltfci
 
-  macos-vz:
-    name: acceptance (macos, vz)
-    # Intel runner. Apple-silicon hosted runners are themselves VMs and cannot
-    # nest Virtualization.framework, so vz cannot be tested there.
-    runs-on: macos-15-large
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
-          persist-credentials: false
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-        with:
-          terraform_version: "1.9.*"
-          terraform_wrapper: false
-
-      - name: Install Lima
-        run: |
-          brew install lima
-          limactl --version
-
-      - name: Report host capabilities
-        run: limactl info | head -c 2000
-
-      - name: Run acceptance tests
-        env:
-          TF_ACC: "1"
-          RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
-        run: |
-          go test ./internal/provider/ \
-            -run "$RUN_PATTERN" \
-            -v -timeout 110m
-
-      - name: Clean up any leftover instances and disks
+      - name: Remove the isolated LIMA_HOME
         if: always()
-        env:
-          LIMA_HOME: /tmp/ltfci
-        run: |
-          for name in $(limactl list -q 2>/dev/null); do
-            echo "removing leftover instance $name"
-            limactl unprotect "$name" || true
-            limactl delete --tty=false --force "$name" || true
-          done
-          for disk in $(limactl disk list --json 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p'); do
-            echo "removing leftover disk $disk"
-            limactl disk delete "$disk" || true
-          done
-          rm -rf /tmp/ltfci
+        run: rm -rf /tmp/ltfci

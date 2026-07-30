@@ -1,0 +1,57 @@
+---
+page_title: "lima_instance Data Source - terraform-provider-lima"
+description: |-
+  Reads an existing Lima instance.
+---
+<!--
+  GENERATED FILE - DO NOT EDIT.
+
+  Source: templates/data-sources/instance.md.tmpl
+  Regenerate: make docs      (make docs-check fails if this file disagrees)
+
+  The attribute reference comes from the provider schema, so it cannot drift
+  from the code. The narrative around it is hand-written in the template.
+-->
+
+# lima_instance (Data Source)
+
+Reads an existing Lima instance. This data source never modifies the instance.
+
+`name` is the **real** Lima instance name and is **not** affected by the
+provider's `name_prefix`, so it can read instances Terraform does not manage.
+
+## Example usage
+
+```hcl
+data "lima_instance" "default" {
+  name = "default"
+}
+
+output "default_status" {
+  value = data.lima_instance.default.status
+}
+
+output "ssh_command" {
+  value = "ssh -F ${data.lima_instance.default.ssh_config} ${data.lima_instance.default.hostname}"
+}
+```
+
+Reading an instance managed elsewhere in the same configuration:
+
+```hcl
+data "lima_instance" "managed" {
+  name = lima_instance.dev.instance_name
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Notes
+
+**On a stopped instance, `ssh_address` and `ssh_port` are last-known values,
+not a live endpoint.** Lima continues to report them after a stop.
+
+If the instance does not exist, the data source fails with an error naming the
+`LIMA_HOME` that was searched and suggesting `limactl list`. Use the
+`lima_host` data source's `instance_names` attribute if you need to check for
+existence without failing.

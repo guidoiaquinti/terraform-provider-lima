@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -25,7 +27,20 @@ func canonicalHome(dir string) string {
 //
 // It runs for unit tests too, but only creates a directory when TF_ACC is set,
 // so a plain `go test ./...` touches nothing.
+//
+// It also hosts the `-sweep` entry point, which exits before any test runs. See
+// sweep_test.go.
 func TestMain(m *testing.M) {
+	// Resolved before flag.Parse, and parsed here rather than left to m.Run,
+	// because -sweep has to be readable before deciding whether to run tests at
+	// all.
+	sweep := sweepHomeFlag()
+	flag.Parse()
+
+	if home := strings.TrimSpace(sweep.Value.String()); home != "" {
+		os.Exit(runSweep(home))
+	}
+
 	code := func() int {
 		if os.Getenv("TF_ACC") == "" {
 			return m.Run()

@@ -2,6 +2,66 @@
 
 Thanks for your interest. This is an independent, unofficial provider.
 
+By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Getting help, versus reporting a bug
+
+These are different things and they go to different places.
+
+| You have | Use |
+| -------- | --- |
+| A question, or a configuration that does not work the way you expected | [Discussions → Q&A](https://github.com/guidoiaquinti/terraform-provider-lima/discussions/categories/q-a) |
+| A reproducible defect in the provider | [Bug report](https://github.com/guidoiaquinti/terraform-provider-lima/issues/new?template=bug_report.yml) |
+| A capability the provider does not have | [Feature request](https://github.com/guidoiaquinti/terraform-provider-lima/issues/new?template=feature_request.yml) — check [`ROADMAP.md`](ROADMAP.md) first, which explains what was deliberately left out and why |
+| A suspected vulnerability | [`SECURITY.md`](SECURITY.md) — **not** a public issue |
+| A problem that also happens when you run `limactl` directly | [lima-vm/lima](https://github.com/lima-vm/lima/issues) — this provider is an unaffiliated wrapper |
+
+Issues are for things a maintainer can act on. "My stack does not come up" with
+no isolation is a discussion, and will be moved to one.
+
+Before filing a bug, please confirm it is the provider and not Lima: run the
+equivalent `limactl` command by hand. That single step resolves most reports,
+and the answer belongs in the issue either way.
+
+## Scope of pull requests
+
+Please **open an issue or a discussion before writing a significant feature.**
+This is not a formality. A merged feature transfers its maintenance to the
+maintainers indefinitely, and this provider has a deliberately narrow contract
+with `limactl` (see below) that a well-meaning patch can quietly break. Several
+capabilities that look like obvious additions are absent on purpose, with the
+reasoning recorded in [`ROADMAP.md`](ROADMAP.md) — a pull request implementing
+one of those needs the reasoning addressed, not just the code.
+
+Always welcome without prior discussion:
+
+- Bug fixes with a test that fails before the fix
+- Documentation corrections
+- Additional test coverage
+- Updates to `docs/development/lima-cli-contract.md` verified against a real
+  `limactl`
+
+## Use of AI
+
+This project is developed with AI assistance, and that is not treated as
+incidental: the architecture boundary, the recorded CLI contract and the
+unusually explicit test rationale all exist partly to make AI-assisted changes
+reviewable. The maintainer owns the outcome regardless of how a change was
+produced.
+
+**If you used an AI tool to produce a contribution — code, tests,
+documentation, or an issue report — say so in the pull request or issue.**
+Name the tool. You do not need to paste your prompts, but do flag anything you
+have not personally verified, and in particular:
+
+- Any claim about `limactl` behaviour that you did not confirm by running it.
+  Generated descriptions of CLI behaviour are frequently plausible and wrong,
+  and this repository's correctness rests on that contract.
+- Any test that you did not watch fail before the change that makes it pass.
+
+Undisclosed AI-generated content that turns out to be unverified is the one
+thing likely to get a pull request closed rather than reviewed.
+
 ## Getting set up
 
 ```console
@@ -69,21 +129,66 @@ If Lima's output changes, update the fixtures in
 
 ## Tests
 
-- Add tests alongside behaviour, not afterwards.
+- Add tests alongside behaviour, not afterwards. Write the test first and watch
+  it fail; a test that passed the moment you wrote it has not been shown to test
+  anything.
 - Prefer table-driven tests.
 - Unit tests must never require a VM. Use the stateful fake in
   `internal/testutil`; it plugs in at the process-execution boundary, so your
   real argument construction and output parsing are still exercised.
+- For resource and data source behaviour, use the harness in
+  `internal/provider/harness_test.go` rather than calling methods directly. It
+  drives the real `Create`/`Read`/`Update`/`Delete`/`ImportState` against the
+  fake and initialises each response the way the framework does — notably a
+  **null** state for create and update, which is what makes "did the resource
+  record what it did" a real assertion rather than a tautology.
 - Tests must not depend on execution order and should run in parallel where
   they do not mutate process state.
 - Acceptance tests must use unique, short instance names and register cleanup
-  that runs even on failure.
+  that runs even on failure. If you leave VMs behind, `make sweep` removes them.
+- If you extend `internal/testutil`, keep it faithful to Lima rather than
+  convenient. A fake that models a state Lima cannot be in produces tests that
+  pass against behaviour that cannot happen — for example, a disk is reported
+  in use only while its holder is *running*, so `AttachDisk` alone does not lock
+  it and the holder has to be seeded too.
 
 ## Documentation
 
-The mutability table in `README.md` and `docs/resources/instance.md` must
-reflect the plan modifiers in the code. If you change a modifier, change both
-tables in the same commit.
+**`docs/` is generated. Edit `templates/`.**
+
+```console
+$ make docs          # regenerate docs/ from templates/ and the schema
+$ make docs-check    # fail if docs/ is stale or was hand-edited
+```
+
+`docs-check` runs in CI on every pull request and compares `docs/` against a
+fresh regeneration, so both directions fail the build: a schema description you
+changed without regenerating, and a page you edited by hand.
+
+What lives where:
+
+| Content | Source |
+| ------- | ------ |
+| Attribute reference — names, types, descriptions | the provider schema, via `{{ .SchemaMarkdown }}` |
+| Narrative — why an attribute replaces, what a timeout costs, how import adopts | `templates/**/*.md.tmpl` |
+| Guides | `templates/guides/*.md.tmpl` |
+
+So an attribute's description belongs in its `MarkdownDescription` in the schema,
+not in a documentation page. Writing it in both is how they drift.
+
+Two things generation cannot derive, which tests enforce instead:
+
+- The mutability table in `README.md` and `templates/resources/instance.md.tmpl`
+  must reflect the plan modifiers in the code. Change a modifier, change both
+  tables in the same commit.
+- The documented timeout defaults must match the constants in
+  `lima.DefaultTimeouts`.
+
+Attribute names used in `examples/` and `test/` are checked against the real
+schema by `TestShippedHCLUsesOnlyRealAttributeNames`, because `terraform
+validate` does **not** catch a misspelled name inside a nested attribute — it
+validates cleanly on every Terraform and OpenTofu version this repository tests.
+Do not rely on the CLI compatibility job to catch that class of mistake.
 
 ## Adding an in-place update
 

@@ -32,4 +32,10 @@ jobs:
       - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         with:
           version: latest
+          # Verify the configuration against golangci-lint's own schema before
+          # linting with it. `run` tolerates invalid settings — the goconst
+          # exclusions were a string where an array is required, and were still
+          # applied — so without this a config that a future release rejects
+          # outright reaches CI only when that release lands.
+          verify: true
           args: --timeout=5m

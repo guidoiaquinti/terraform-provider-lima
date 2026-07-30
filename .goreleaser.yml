@@ -17,25 +17,31 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    # Only platforms that can host Lima, and only platforms CI compiles.
+    #
+    # Those two constraints used to disagree. This shipped freebsd, 386 and
+    # arm (32-bit) binaries that nothing ever built outside a release: the
+    # cross-compile matrix covered darwin and linux on amd64 and arm64, so four
+    # of the published archives were first compiled by the tag that published
+    # them. The release-dry-run job now builds this whole matrix on every pull
+    # request, and the matrix itself is narrowed to what can work:
+    #
+    #   freebsd   Lima does not support FreeBSD as a host.
+    #   386       Lima requires a 64-bit host.
+    #   arm (v7)  Likewise 32-bit.
+    #
+    # Dropping them is the honest signal: the registry then reports no
+    # compatible provider, instead of installing a binary that cannot find a
+    # working limactl. Windows is kept because Lima supports WSL2 — the provider
+    # is untested there, which the README says, but an uninstallable provider is
+    # worse than an untested one.
     goos:
       - darwin
       - linux
       - windows
-      - freebsd
     goarch:
       - amd64
       - arm64
-      - "386"
-      - arm
-    goarm:
-      - "7"
-    ignore:
-      # Lima does not run on these combinations; shipping them would imply
-      # support that does not exist.
-      - goos: darwin
-        goarch: "386"
-      - goos: darwin
-        goarch: arm
 
 archives:
   - formats: [zip]

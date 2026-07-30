@@ -11,6 +11,71 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Changed
 
+- **Every CI job now runs on a free runner class.** The macOS acceptance job used
+  `macos-15-large`, which GitHub bills even for public repositories, on every
+  pull request with a 120-minute timeout — the one job here that was not free.
+
+  It is removed rather than moved, because there is nowhere free to move it to.
+  Lima's `vz` driver needs hardware virtualisation, GitHub's Apple-silicon
+  runners are themselves virtual machines and cannot nest it, and every Intel
+  macOS class is a larger runner. Upstream Lima runs *all* of its macOS jobs on
+  `macos-15-large` for the same reason.
+
+  macOS coverage is therefore split rather than pretended at: unit tests still
+  run on `macos-latest` in CI, and `vz` acceptance is run locally before a
+  release. `make testacc-run RUN=<pattern>` was added for iterating on one test
+  while doing that. The README platform table and the workflow header both say
+  plainly that `vz` has no CI coverage, and why.
+- **The release build is rehearsed on every pull request.** `.goreleaser.yml`
+  shipped ten archives while CI cross-compiled four targets, so the freebsd,
+  386 and arm (32-bit) binaries were first compiled by the tag that published
+  them — a build failure there was discoverable only by a user.
+
+  The shipped matrix is now darwin, linux and windows on amd64 and arm64 only.
+  FreeBSD is not a Lima host and 32-bit cannot be one, so dropping them makes
+  the registry report no compatible provider instead of installing a binary that
+  cannot work. A `release-dry-run` job replaces the hand-maintained
+  cross-compile matrix: it runs `goreleaser check` and `goreleaser build
+  --snapshot`, which builds exactly what ships and so cannot drift from it, and
+  asserts a binary appeared for all six targets. `make release-check` runs the
+  same thing locally.
+
+  Caching is off in that job, matching the release workflow: a GitHub Actions
+  cache is writable from any branch, so a job producing release-shaped artifacts
+  must not restore one.
+- **Documentation under `docs/` is now generated.** `templates/` plus the
+  provider schema are the source; `tfplugindocs` renders them. **Edit
+  `templates/`, never `docs/`.**
+
+  Previously the pages were hand-written, which kept the reasoning that no
+  generator can derive from a schema but meant every attribute was described
+  twice — once in the schema's `MarkdownDescription`, once in prose — with
+  nothing comparing them. The existing tests asserted a page *existed* per type
+  and that attribute names were *mentioned*, so the two descriptions could say
+  different things indefinitely.
+
+  The split now runs down the middle: the attribute reference comes from the
+  schema via `{{ .SchemaMarkdown }}`, and the narrative around it stays
+  hand-written in the template. `make docs` regenerates; `make docs-check` fails
+  the build in both directions — a schema description changed without
+  regenerating, and a page edited by hand. Every generated page carries a
+  do-not-edit banner naming its template.
+
+  `tfplugindocs` is pinned as a `tool` dependency in `go.mod`, so it runs the
+  same version everywhere and its checksum is in `go.sum`.
+- The internal planning documents under `docs/superpowers/` moved to `notes/`.
+  `docs/` is the directory the Terraform Registry scans and publishes, so it now
+  holds only what a user of the provider is meant to read.
+- Bumped `google.golang.org/grpc` to 1.82.1, `golang.org/x/text` to 0.39.0 and
+  `golang.org/x/net` to 0.56.0, all transitive. The new `govulncheck` job found
+  three advisories whose vulnerable symbols this provider actually reaches:
+  GO-2026-6061, GO-2026-5970 and GO-2026-5026.
+- The `goconst` exclusions in `.golangci.yml` are a list of patterns rather than
+  one string. The string form is not what golangci-lint's schema specifies —
+  `golangci-lint config verify` rejects it — even though `run` applied it
+  anyway. `make lint` and the CI job now verify the configuration before using
+  it, so a config a future release refuses outright cannot go unnoticed.
+
 - **Breaking.** No type has an `id` attribute any more — not `lima_instance`,
   `lima_disk`, or any of the four data sources.
 
@@ -82,6 +147,27 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Fixed
 
+- The fake `limactl` never released a disk when its holder was deleted or
+  stopped, so a disk stayed locked forever against an instance that no longer
+  existed. Lima reports a disk's `instance` only while the holder is *running* —
+  "in use right now", not "attached to" — and the fake stored it statically at
+  attach time. It is now derived, so deleting or stopping the holder frees the
+  disk as it does in reality.
+
+  Found by the sweep ordering test, which is the operation that deletes a holder
+  and then its disks. Three existing tests had been describing a state Lima
+  cannot be in, asserting an in-use disk without ever seeding a running holder;
+  they now seed one, and `AttachDisk` documents that attachment alone does not
+  lock anything.
+- Acceptance tests run with `-count=1`. Go keys a cached test result on the
+  environment variables the test read, so a run that only flipped a variable the
+  suite never inspects could be served from cache and reported green without a
+  VM ever being created. For a suite whose entire value is that it touched real
+  hardware, a cached pass is worse than no run at all.
+- `README.md` documented a `make docs` target that did not exist. It does now.
+- The provider no longer declares `provider.ProviderWithFunctions` while
+  returning `nil` from `Functions`, which advertised a capability resolving to an
+  empty set.
 - A failed restart after a successful reconfiguration now records what was
   applied. `limactl edit` succeeding and the following start failing is not a
   failed change: the instance has the new resources and is simply down. State kept
@@ -193,6 +279,76 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Added
 
+- **`make sweep`** — recovery for an interrupted acceptance run. Every safety
+  property the suite already had holds when a test *fails*; none holds when the
+  run is killed, because `Ctrl-C` skips every `t.Cleanup` and leaves real VMs
+  running plus a `LIMA_HOME` under `/tmp`. That is the ordinary case for anyone
+  who changes their mind mid-suite, and the only remedy was to remember the right
+  `limactl` sequence in the right order.
+
+  The order is the part worth encoding: instances go before disks, because Lima
+  locks a disk while the instance holding it is running, so a disk-first sweep
+  fails on exactly the disks that most need removing. A failure does not stop the
+  sweep — the caller is running it because state is already inconsistent — so
+  failures are collected and reported together.
+
+  The sweep **refuses Lima's default `~/.lima`**, including when given no target
+  at all, since an empty home means the default. A tool that empties a directory
+  of virtual machines must not be able to point at the one holding real ones.
+  `make sweep-tmp` finds and clears every leftover acceptance home under `/tmp`,
+  whose names nobody recorded.
+
+  CI uses the same target. It replaces an inline shell loop that extracted disk
+  names from JSON with a `sed` expression which would have silently matched
+  nothing if Lima reordered its keys, and whose ordering rule lived only in a
+  comment.
+- **Terraform and OpenTofu compatibility are now tested.** The README claimed
+  Terraform 1.0+ and OpenTofu 1.6+; CI pinned a single Terraform minor and never
+  ran OpenTofu at all, so both floors were unverified for the entire history of
+  the repository.
+
+  `test/compat/main.tf` names every provider attribute, every nested attribute
+  and every computed attribute in one fixture, and is validated against
+  Terraform 1.0.0, 1.5.7 and latest, and OpenTofu 1.6.0 and latest. The examples
+  are validated separately on current releases of both CLIs, because an example
+  is written for a person and may use HCL newer than the provider needs — one of
+  them now declares `required_version = ">= 1.2.0"` for exactly that reason, as
+  it uses `lifecycle { precondition }`. The provider itself works on 1.0.
+
+  OpenTofu also gets one acceptance job against real VMs, on Linux amd64.
+- Unit coverage of `internal/provider` went from 44.6% to 85.8%. The
+  Terraform-facing layer — the half a user actually hits — had no coverage of any
+  failure path, because provoking one needs Lima to fail on demand and the
+  acceptance suite drives the real binary. Resources and data sources are now
+  driven through their real `Create`/`Read`/`Update`/`Delete`/`ImportState`
+  against the fake `limactl`, including the name collision, the protected
+  instance, the locked disk, the unparseable timeout and the unsupported Lima
+  version, with the diagnostics asserted rather than just the error.
+
+  The harness mirrors how the framework initialises each response, which is not
+  obvious and matters: for create and update `resp.State.Raw` starts **null**,
+  not as the prior state, so "did the resource record what it did" is a real
+  question. A harness seeded with the prior state would answer yes regardless.
+- A `govulncheck` job, plus CodeQL and dependency review. `govulncheck` is the
+  one that works on any repository with no GitHub Advanced Security
+  entitlement, and the most precise for Go: it reports only advisories whose
+  vulnerable symbols this code actually reaches. The other two are gated on the
+  repository being public, so they skip cleanly rather than erroring.
+- `TestShippedHCLUsesOnlyRealAttributeNames`, which parses every shipped `.tf`
+  file and checks each attribute name against the real schema.
+
+  This closes a measured gap rather than a hypothetical one: `terraform validate`
+  does **not** catch a misspelled attribute *inside* a nested attribute.
+  Renaming `port_forwards[].protocol` to `proto` validates cleanly on Terraform
+  1.0 through 1.15 and OpenTofu 1.6 through 1.10, because the object literal is
+  converted at plan time rather than at validate time. So no CLI job can be the
+  guard here, and a wrong key would ship in an example and silently do nothing.
+- A troubleshooting guide at `docs/guides/troubleshooting.md`, mapping each
+  diagnostic the provider emits to what causes it and what to do — protection
+  refusals, disk locks, the socket-path limit, plain mode, the version gate.
+- `CODE_OF_CONDUCT.md`, `.github/CODEOWNERS`, a stated pull-request scope, an
+  AI-disclosure requirement for contributions, and issue-chooser routing that
+  separates questions from actionable defects.
 - `terraform-registry-manifest.json`, declaring protocol version 6. The Terraform
   Registry reads the wire protocol from this file; without it a published release
   is treated as an older-SDK provider and every `terraform init` against it fails.

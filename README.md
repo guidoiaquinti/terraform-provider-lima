@@ -1,5 +1,10 @@
 # Terraform provider for Lima
 
+[![test](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/test.yml/badge.svg)](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/test.yml)
+[![acceptance](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/acceptance.yml/badge.svg)](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/acceptance.yml)
+[![lint](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/lint.yml/badge.svg)](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/lint.yml)
+[![security](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/security.yml/badge.svg)](https://github.com/guidoiaquinti/terraform-provider-lima/actions/workflows/security.yml)
+
 This Terraform / OpenTofu provider allows managing local
 [Lima](https://lima-vm.io/) virtual machines declaratively.
 
@@ -71,7 +76,9 @@ The exact command contract, captured by running the real CLI, is documented in
 
 - [Lima](https://lima-vm.io/docs/installation/) 2.0 or newer, with `limactl`
   on `PATH`
-- Terraform 1.0+ or OpenTofu 1.6+
+- Terraform 1.0+ or OpenTofu 1.6+ — both floors are exercised in CI on every
+  pull request, against a fixture that names the provider's whole schema
+  surface. See [CLI compatibility](#cli-compatibility).
 - Go 1.26.5+ (only to build the provider)
 
 Verify Lima works before using the provider:
@@ -224,17 +231,50 @@ Lima cannot break a working configuration.
 Version policy lives in one place, `lima.CheckVersion`; version checks are not
 scattered through resource code.
 
+## CLI compatibility
+
+Terraform and OpenTofu floors are claims, so CI checks them rather than the
+README asserting them. Every pull request validates
+[`test/compat/main.tf`](test/compat/main.tf) — one fixture naming every provider
+attribute, every nested attribute and every computed attribute — against:
+
+| CLI      | Versions exercised            |
+| -------- | ----------------------------- |
+| Terraform | 1.0.0, 1.5.7, latest         |
+| OpenTofu  | 1.6.0, latest                |
+
+The shipped examples are validated separately, on current releases of both CLIs,
+because an example is written for a person and may use HCL newer than the
+provider needs. One of them declares `required_version = ">= 1.2.0"` for exactly
+that reason: it uses `lifecycle { precondition }`, which arrived in Terraform
+1.2. The provider itself works on 1.0.
+
+**What this does not prove.** `terraform validate` does not check attribute names
+*inside* a nested attribute — renaming `port_forwards[].protocol` to `proto`
+validates cleanly on every version above. That gap is covered by a unit test
+which parses the shipped HCL and checks each name against the real schema.
+
 ## Supported host platforms
 
 | Platform      | Unit tests | Acceptance tests            | Notes                                             |
 | ------------- | ---------- | --------------------------- | ------------------------------------------------- |
-| macOS arm64   | CI         | verified locally            | `vz` backend. No hosted runner can nest `vz`.      |
-| Linux amd64   | CI         | CI, every pull request      | `qemu` backend. See below.                         |
+| Linux amd64   | CI         | CI, every pull request      | `qemu` backend, with Terraform **and** OpenTofu.   |
 | Linux arm64   | CI         | CI, every pull request      | `qemu` backend, on a free arm64 runner.            |
-| macOS amd64   | CI         | CI, every pull request      | `vz` backend.                                      |
+| macOS arm64   | CI         | locally, before release     | `vz` backend. No free runner can boot a VM on macOS. |
+| macOS amd64   | CI         | not run                     | `vz` backend. Same reason.                         |
 | Windows       | not run    | not applicable              | Lima supports WSL2; the provider is untested there.|
 
 Unit tests need no VM and run on any platform.
+
+**Every CI job runs on a free runner class.** `ubuntu-24.04` and
+`ubuntu-24.04-arm` are both free for public repositories, as are the standard
+`macos-latest` runners the unit tests use.
+
+OpenTofu gets one acceptance job, on Linux amd64, rather than a copy of every
+job: what differs between the two CLIs is the plugin protocol handshake and the
+test harness's provider address, none of which is architecture- or
+backend-dependent, whereas each added VM job costs runner minutes on every pull
+request.
 
 Acceptance tests **do** run on GitHub-hosted runners. The upstream Lima project
 runs its own VM integration tests there, which is the evidence this is modelled
@@ -245,9 +285,36 @@ Linux + QEMU job runs on every pull request, on both `ubuntu-24.04` and
 two Linux jobs differ in more than host CPU: a different QEMU system emulator,
 a different EFI firmware package, and a different guest image per template.
 
-The macOS + `vz` job runs on every pull request as well. Apple-silicon hosted
-runners are themselves virtual machines and cannot nest
-Virtualization.framework, so the `vz` job runs on an Intel macOS runner.
+### Why there is no macOS acceptance job
+
+Lima's `vz` driver is Virtualization.framework, which needs hardware
+virtualisation. GitHub's Apple-silicon runners are themselves virtual machines
+and cannot nest it, so `vz` needs an Intel macOS runner — and every Intel macOS
+class (`macos-*-large`) is a *larger* runner, which GitHub bills even for public
+repositories.
+
+This is not a limitation of this project's CI setup. Upstream Lima runs **all**
+of its macOS jobs on `macos-15-large`, including QEMU-on-macOS, for the same
+reason: there is no free GitHub runner on which Lima can boot a virtual machine
+on macOS.
+
+So `vz` coverage is not automated, and this README does not pretend otherwise.
+The Linux jobs are not a substitute — `vz` and `qemu` are different Lima drivers.
+Run the suite locally on macOS before cutting a release:
+
+```console
+$ make testacc                      # whole suite, ~40 min on an M-series Mac
+$ make testacc-run RUN=TestAccInstance_basic   # one test while iterating
+```
+
+The suite derives the backend and its mount paths from `limactl info` rather
+than hardcoding either, so the same tests run unchanged on `vz` and `qemu`.
+
+If you later decide per-pull-request `vz` coverage is worth paying for, add a job
+on `macos-15-large` — [the workflow header][accept] records exactly what it
+needs.
+
+[accept]: .github/workflows/acceptance.yml
 
 Linux and macOS are not redundant — `vz` and `qemu` are different Lima drivers.
 The acceptance suite derives the backend and its mount paths from `limactl info`
@@ -384,15 +451,52 @@ $ make help          # list targets
 $ make build         # build the binary
 $ make test          # unit tests, no VM required
 $ make test-race     # unit tests with the race detector
+$ make cover         # unit tests with a coverage summary
 $ make lint          # golangci-lint
-$ make check         # fmt-check, vet, test, lint, build
-$ make docs          # regenerate docs from the schema
+$ make docs          # regenerate docs/ from templates/ and the schema
+$ make docs-check    # fail if docs/ is stale or hand-edited
+$ make check         # fmt-check, vet, test, lint, build, docs-check
+$ make sweep         # remove VMs left by an interrupted acceptance run
 ```
+
+### Documentation is generated
+
+`docs/` is produced by
+[tfplugindocs](https://github.com/hashicorp/terraform-plugin-docs) from
+`templates/` plus the provider schema. **Edit `templates/`, never `docs/`** — a
+hand edit survives until the next `make docs` silently reverts it, and
+`make docs-check` fails the build in the meantime.
+
+The split is deliberate. The attribute reference comes from the schema, so a
+description can no longer drift from the code; the narrative around it — why an
+attribute replaces, what a timeout means, how import adopts an instance — stays
+hand-written, because no generator derives reasoning from a schema.
+
+tfplugindocs is pinned as a `tool` dependency in `go.mod`, so `make docs` runs
+the same version everywhere and its checksum is in `go.sum`.
+
+Some things generation cannot check, and tests cover instead: the mutability
+table matching the plan modifiers, the documented timeout defaults matching the
+constants they describe, and every shipped `.tf` file using attribute names that
+actually exist — which `terraform validate` cannot verify inside a nested
+attribute.
+
+### Testing
 
 Unit tests never create a VM. The `internal/testutil` package provides a
 stateful fake `limactl` that plugs in at the process-execution boundary, so
 tests exercise the provider's real argument construction, environment merging
 and output parsing.
+
+That fake is also what makes the provider layer testable without a hypervisor:
+resources and data sources are driven through their real
+`Create`/`Read`/`Update`/`Delete`/`ImportState` methods against it, including the
+failure paths a real `limactl` will not produce on demand — a name collision, a
+protected instance, a locked disk, a restart that fails after a successful edit.
+The harness mirrors how the framework itself initialises each response, which
+matters: for create and update the framework starts the response state *null*,
+so "did the resource record what it did" is a question the tests can actually
+ask.
 
 A small set of tests named `TestReal*` runs against a real `limactl` when one
 is installed, and skips otherwise. They are cheap — no VM is created — and
@@ -421,6 +525,36 @@ Safety properties, all enforced in code:
 
 Set `LIMA_PROVIDER_ACC_HOME` to place the isolated home somewhere specific.
 Keep it short: Lima's socket paths must fit inside `UNIX_PATH_MAX`.
+
+### Recovering from an interrupted run
+
+Every safety property above holds when a test *fails*. None of them holds when
+the run is **killed**: `Ctrl-C` skips every registered cleanup, so real VMs keep
+running and the temporary `LIMA_HOME` stays behind. That is the ordinary case for
+anyone who changes their mind mid-suite, so it has a first-class remedy:
+
+```console
+$ make sweep                     # the LIMA_HOME the suite uses
+$ make sweep SWEEP_HOME=/tmp/x   # a specific one
+$ make sweep-tmp                 # every leftover acceptance home under /tmp
+```
+
+Two properties matter more than tidiness, and both are unit-tested:
+
+- **Instances are removed before disks**, because a running instance holds a lock
+  on anything attached to it, so a disk-first sweep fails on exactly the disks
+  that most need removing.
+- **The sweep refuses Lima's default `~/.lima`**, including when given no target
+  at all — an empty home means the default. A tool that deletes every VM in a
+  directory must not be able to point at the one holding your real machines.
+
+A failure does not stop the sweep: the caller is running it precisely because
+state is already inconsistent, so failures are collected and reported together
+rather than abandoning everything after the first one.
+
+CI uses the same target, which replaced an inline shell loop that extracted disk
+names from JSON with a `sed` expression — one that would silently match nothing
+if Lima reordered its keys.
 
 ## Security considerations
 
