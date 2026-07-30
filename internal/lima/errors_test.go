@@ -254,3 +254,100 @@ func TestLogLineString(t *testing.T) {
 		}
 	}
 }
+
+// Lima says "already exists" about things other than an instance name, and the
+// marker used to match all of them.
+//
+// Concurrent first-time creates into an empty LIMA_HOME race on the shared SSH
+// keypair, because Lima generates it by shelling out to ssh-keygen with no
+// locking. The loser's stderr is:
+//
+//	failed to run [ssh-keygen ... -f <home>/_config/user]: "<home>/_config/user
+//	already exists.\nOverwrite (y/n)? ": exit status 1
+//
+// A bare "already exists" substring matched that, so the provider reported a name
+// collision and told the user to `terraform import` an instance that does not
+// exist. Both messages were captured from Lima 2.2.0.
+func TestIsAlreadyExistsDistinguishesTheKeypairRace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{
+			name:   "genuine instance collision",
+			stderr: "time=\"...\" level=fatal msg=\"instance `dev` already exists\"\n",
+			want:   true,
+		},
+		{
+			name: "shared keypair race is not a collision",
+			stderr: "time=\"...\" level=fatal msg=\"failed to run [ssh-keygen -t ed25519 -q -N  -C lima " +
+				"-f /tmp/lima/_config/user]: \\\"/tmp/lima/_config/user already exists.\\\\nOverwrite (y/n)? \\\": exit status 1\"\n",
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := &CommandError{Binary: "limactl", ExitCode: 1, Stderr: tc.stderr}
+			if got := IsAlreadyExists(err); got != tc.want {
+				t.Errorf("IsAlreadyExists() = %v, want %v for %s", got, tc.want, tc.name)
+			}
+		})
+	}
+}
+
+// The disk marker has the same shape, and Lima's disk collision message is
+// "disk `name` already exists (...)", so it must survive the tightening.
+func TestIsDiskExistsStillMatchesTheRealMessage(t *testing.T) {
+	t.Parallel()
+
+	err := &CommandError{
+		Binary:   "limactl",
+		ExitCode: 1,
+		Stderr:   "time=\"...\" level=fatal msg=\"disk `data` already exists (`/tmp/lima/_disks/data`)\"\n",
+	}
+	if !IsDiskExists(err) {
+		t.Error("IsDiskExists() = false for Lima's real disk collision message")
+	}
+
+	race := &CommandError{
+		Binary:   "limactl",
+		ExitCode: 1,
+		Stderr:   "level=fatal msg=\"/tmp/lima/_config/user already exists.\"\n",
+	}
+	if IsDiskExists(race) {
+		t.Error("IsDiskExists() = true for the shared keypair race")
+	}
+}
+
+// A carriage return inside msg= must not survive into a diagnostic: it would
+// overwrite whatever the terminal had already drawn on that line.
+//
+// This was uncovered by nothing. The hand-rolled unquoting always dropped \r, and
+// when a strconv.Unquote fast path was added it silently started preserving it,
+// because no test exercised the case.
+func TestSanitizeStderrDropsCarriageReturns(t *testing.T) {
+	t.Parallel()
+
+	// Both a well-formed literal (the Unquote path) and one with trailing content
+	// after the closing quote (the fallback scan).
+	for _, stderr := range []string{
+		"time=\"t\" level=fatal msg=\"first\\rsecond\"\n",
+		"time=\"t\" level=fatal msg=\"first\\rsecond\" extra=1\n",
+	} {
+		lines := SanitizeStderrLines(stderr)
+		if len(lines) != 1 {
+			t.Fatalf("parsed %d lines from %q, want 1", len(lines), stderr)
+		}
+		if strings.Contains(lines[0].Message, "\r") {
+			t.Errorf("message %q still contains a carriage return", lines[0].Message)
+		}
+		if !strings.Contains(lines[0].Message, "first") || !strings.Contains(lines[0].Message, "second") {
+			t.Errorf("message %q lost content", lines[0].Message)
+		}
+	}
+}

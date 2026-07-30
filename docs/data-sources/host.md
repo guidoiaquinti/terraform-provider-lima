@@ -65,7 +65,11 @@ This data source takes no arguments.
 
 ### Read-only
 
-- `id` (String) The resolved `limactl` path.
+There is deliberately **no `id`**. Lima exposes no object identifier of its own —
+`limactl list --list-fields` reports none, and the only UUID on disk belongs to the
+`vz` backend and to no `limactl` command — so an `id` could only repeat the name,
+which is Lima's actual primary key.
+
 - `lima_version` (String) Lima version reported by `limactl info`.
 - `host_os` (String) Host operating system, for example `darwin` or `linux`.
 - `host_arch` (String) Host architecture, for example `aarch64` or `x86_64`.

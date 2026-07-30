@@ -35,7 +35,7 @@ func TestRealLimactlVersionIsSupported(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	v, err := c.Version(ctx)
+	v, err := c.DetectVersion(ctx)
 	if err != nil {
 		t.Fatalf("Version against real limactl: %v", err)
 	}

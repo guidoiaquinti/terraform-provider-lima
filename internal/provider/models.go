@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	dstimeouts "github.com/hashicorp/terraform-plugin-framework-timeouts/datasource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -326,7 +327,6 @@ func observedSize(configured types.String, observedBytes int64) types.String {
 // instanceDataSourceModel mirrors the lima_instance data source schema.
 type instanceDataSourceModel struct {
 	Name        types.String `tfsdk:"name"`
-	ID          types.String `tfsdk:"id"`
 	Status      types.String `tfsdk:"status"`
 	RawStatus   types.String `tfsdk:"raw_status"`
 	Arch        types.String `tfsdk:"arch"`
@@ -342,10 +342,11 @@ type instanceDataSourceModel struct {
 	Dir         types.String `tfsdk:"dir"`
 	Protected   types.Bool   `tfsdk:"protected"`
 	LimaVersion types.String `tfsdk:"lima_version"`
+
+	Timeouts dstimeouts.Value `tfsdk:"timeouts"`
 }
 
 func (m *instanceDataSourceModel) applyInstance(inst lima.Instance, providerVersion string) {
-	m.ID = types.StringValue(inst.Name)
 	m.Name = types.StringValue(inst.Name)
 	m.Status = types.StringValue(string(inst.Status()))
 	m.RawStatus = types.StringValue(inst.RawStatus)
@@ -390,9 +391,67 @@ func (m *instanceDataSourceModel) applyInstance(inst lima.Instance, providerVers
 	}
 }
 
+// instancesDataSourceModel mirrors the lima_instances data source schema.
+type instancesDataSourceModel struct {
+	Instances []instanceEntryModel `tfsdk:"instances"`
+
+	Timeouts dstimeouts.Value `tfsdk:"timeouts"`
+}
+
+// instanceEntryModel is one entry of the lima_instances list.
+//
+// It carries the same fields as instanceDataSourceModel, because both describe
+// the same shared attribute set (instanceObservedAttributes). The two cannot be
+// one type: the singular data source takes `name` as an argument and holds a
+// timeouts value, while an entry holds neither.
+// TestInstanceDataSourcesAgreeOnAttributes pins them against the shared schema.
+type instanceEntryModel struct {
+	Name        types.String `tfsdk:"name"`
+	Status      types.String `tfsdk:"status"`
+	RawStatus   types.String `tfsdk:"raw_status"`
+	Arch        types.String `tfsdk:"arch"`
+	VMType      types.String `tfsdk:"vm_type"`
+	CPUs        types.Int64  `tfsdk:"cpus"`
+	Memory      types.String `tfsdk:"memory"`
+	Disk        types.String `tfsdk:"disk"`
+	SSHAddress  types.String `tfsdk:"ssh_address"`
+	SSHPort     types.Int64  `tfsdk:"ssh_port"`
+	SSHUser     types.String `tfsdk:"ssh_user"`
+	SSHConfig   types.String `tfsdk:"ssh_config"`
+	Hostname    types.String `tfsdk:"hostname"`
+	Dir         types.String `tfsdk:"dir"`
+	Protected   types.Bool   `tfsdk:"protected"`
+	LimaVersion types.String `tfsdk:"lima_version"`
+}
+
+// applyInstance copies observed state onto the entry.
+//
+// Delegates to instanceDataSourceModel so the mapping — including the
+// lima_version fallback and the null-for-absent rules — exists in one place.
+func (m *instanceEntryModel) applyInstance(inst lima.Instance, providerVersion string) {
+	var single instanceDataSourceModel
+	single.applyInstance(inst, providerVersion)
+
+	m.Name = single.Name
+	m.Status = single.Status
+	m.RawStatus = single.RawStatus
+	m.Arch = single.Arch
+	m.VMType = single.VMType
+	m.CPUs = single.CPUs
+	m.Memory = single.Memory
+	m.Disk = single.Disk
+	m.SSHAddress = single.SSHAddress
+	m.SSHPort = single.SSHPort
+	m.SSHUser = single.SSHUser
+	m.SSHConfig = single.SSHConfig
+	m.Hostname = single.Hostname
+	m.Dir = single.Dir
+	m.Protected = single.Protected
+	m.LimaVersion = single.LimaVersion
+}
+
 // hostDataSourceModel mirrors the lima_host data source schema.
 type hostDataSourceModel struct {
-	ID            types.String `tfsdk:"id"`
 	LimaVersion   types.String `tfsdk:"lima_version"`
 	HostOS        types.String `tfsdk:"host_os"`
 	HostArch      types.String `tfsdk:"host_arch"`
@@ -401,6 +460,8 @@ type hostDataSourceModel struct {
 	BinaryPath    types.String `tfsdk:"binary_path"`
 	Templates     types.List   `tfsdk:"templates"`
 	InstanceNames types.List   `tfsdk:"instance_names"`
+
+	Timeouts dstimeouts.Value `tfsdk:"timeouts"`
 }
 
 func stringValue(v types.String) string {
@@ -627,7 +688,6 @@ type diskModel struct {
 	Size   types.String `tfsdk:"size"`
 	Format types.String `tfsdk:"format"`
 
-	ID           types.String `tfsdk:"id"`
 	ActualFormat types.String `tfsdk:"actual_format"`
 	Dir          types.String `tfsdk:"dir"`
 	MountPoint   types.String `tfsdk:"mount_point"`
@@ -647,7 +707,6 @@ type diskModel struct {
 // a vz host is raw even when qcow2 was requested; copying that into `format`
 // would fight the configuration forever. It goes to actual_format instead.
 func (m *diskModel) applyDisk(d lima.Disk) {
-	m.ID = types.StringValue(d.Name)
 	m.Name = types.StringValue(d.Name)
 	m.Size = observedSize(m.Size, d.SizeBytes)
 	m.ActualFormat = optionalString(d.Format)
@@ -659,17 +718,17 @@ func (m *diskModel) applyDisk(d lima.Disk) {
 // diskDataSourceModel mirrors the lima_disk data source schema.
 type diskDataSourceModel struct {
 	Name       types.String `tfsdk:"name"`
-	ID         types.String `tfsdk:"id"`
 	Size       types.String `tfsdk:"size"`
 	SizeBytes  types.Int64  `tfsdk:"size_bytes"`
 	Format     types.String `tfsdk:"format"`
 	Dir        types.String `tfsdk:"dir"`
 	MountPoint types.String `tfsdk:"mount_point"`
 	InUseBy    types.String `tfsdk:"in_use_by"`
+
+	Timeouts dstimeouts.Value `tfsdk:"timeouts"`
 }
 
 func (m *diskDataSourceModel) applyDisk(d lima.Disk) {
-	m.ID = types.StringValue(d.Name)
 	m.Name = types.StringValue(d.Name)
 	m.Size = types.StringValue(lima.FormatSize(d.SizeBytes))
 	m.SizeBytes = types.Int64Value(d.SizeBytes)

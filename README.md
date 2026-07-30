@@ -53,7 +53,7 @@ The exact command contract, captured by running the real CLI, is documented in
 
 - `lima_instance` resource: create, read, update, delete and import
 - `lima_disk` resource: additional disks, with in-place growth
-- `lima_instance`, `lima_disk` and `lima_host` data sources
+- `lima_instance`, `lima_instances`, `lima_disk` and `lima_host` data sources
 - Typed attributes for CPU, memory, disk, VM type and architecture
 - Nested list attributes for mounts, port forwards and native provisioning
 - Raw Lima YAML and a `config_overrides` escape hatch, merged deterministically
@@ -62,7 +62,8 @@ The exact command contract, captured by running the real CLI, is documented in
 - In-place start/stop and protection changes
 - In-place mount and port-forward changes, preserving template-contributed entries
 - Mount and port-forward drift detection, restored in place
-- Per-instance locking so concurrent applies do not race
+- Per-instance locking so concurrent applies do not race, plus a home-wide gate
+  for Lima's first-use setup, which is not per-instance and does race
 - Context-aware, non-interactive command execution
 - Redaction of sensitive values in logs and diagnostics
 

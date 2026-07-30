@@ -48,8 +48,11 @@ var ErrDiskExists = errors.New("lima: disk already exists")
 // Observed Lima 2.2.0 wording, used only as a fallback: in-use is normally
 // detected structurally from the `instance` field.
 var (
-	diskInUseMarkers  = []string{"in use by instance", "used by running instance"}
-	diskExistsMarkers = []string{"already exists"}
+	diskInUseMarkers = []string{"in use by instance", "used by running instance"}
+	// Backtick-anchored for the same reason as alreadyExistsMarkers: Lima says
+	// "disk `data` already exists (...)" for a real collision, and says
+	// "already exists" about unrelated things.
+	diskExistsMarkers = []string{"` already exists"}
 	diskShrinkMarkers = []string{"shrinking is currently unavailable"}
 )
 

@@ -277,9 +277,6 @@ type UserView struct {
 // Status returns the normalised status.
 func (i Instance) Status() Status { return NormalizeStatus(i.RawStatus) }
 
-// Exists reports whether Lima considers the instance materialised at all.
-func (i Instance) Exists() bool { return i.Name != "" }
-
 // SSHInfo is the connection information derived from an inspect result.
 //
 // It is assembled from the list output rather than from `limactl show-ssh`,

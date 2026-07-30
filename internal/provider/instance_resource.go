@@ -35,6 +35,10 @@ const (
 
 	attrConfig          = "config"
 	attrConfigOverrides = "config_overrides"
+
+	// attrInstanceName is the real Lima name, and the resource's identity now
+	// that there is no `id`.
+	attrInstanceName = "instance_name"
 )
 
 var (
@@ -280,7 +284,7 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			// instance_name for the whole life of the resource, so it was two
 			// attributes for one fact. terraform-plugin-framework does not
 			// require one.
-			"instance_name": schema.StringAttribute{
+			attrInstanceName: schema.StringAttribute{
 				Computed: true,
 				MarkdownDescription: "The real Lima instance name, that is `name_prefix` followed by `name`. " +
 					"This is also the import ID.",
@@ -696,15 +700,30 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 	wantProtect := boolValue(plan.Protect)
 	wantRunning := boolValue(plan.Start)
 
-	// Protection is cleared before other work and reapplied after it, so a
-	// protected instance can still be reconfigured in a single apply.
-	if !wantProtect && boolValue(state.Protect) {
+	// Protection is cleared before the rest of the update and reapplied after it,
+	// so a protected instance can still be reconfigured in a single apply. That
+	// means a failure in between leaves the flag already changed, so `protection`
+	// tracks what is actually in effect and recordProtection writes it into state
+	// on the way out. Without that, a failed apply left state claiming a
+	// protection the instance no longer had.
+	protection := boolValue(state.Protect)
+
+	recordProtection := func(actual bool) {
+		if actual == boolValue(state.Protect) {
+			return
+		}
+		state.Protect = types.BoolValue(actual)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	}
+
+	if !wantProtect && protection {
 		if err := r.data.Service.SetProtection(ctx, name, false); err != nil {
 			resp.Diagnostics.AddError(
 				fmt.Sprintf("Unable to remove protection from Lima instance %q", name),
 				formatCommandError(err))
 			return
 		}
+		protection = false
 	}
 
 	// Adoption: the user is declaring a template for an instance that has
@@ -734,16 +753,30 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		PreviousPortForwards: configuredPortForwards(stateLists),
 	}); err != nil {
 		r.addResizeError(resp, name, resize, wantRunning, err)
+
+		// A failed restart is not a failed change: the edit applied, and only
+		// bringing the instance back up did not. State has to say so, or the next
+		// plan proposes applying resources the instance already has, and anyone
+		// reading state sees values that are no longer true.
+		var restartErr *lima.RestartAfterEditError
+		if errors.As(err, &restartErr) {
+			r.recordAppliedResize(ctx, resp, &plan, planLists, name, protection)
+			return
+		}
+
+		recordProtection(protection)
 		return
 	}
 
-	if wantProtect && !boolValue(state.Protect) {
+	if wantProtect && !protection {
 		if err := r.data.Service.SetProtection(ctx, name, true); err != nil {
 			resp.Diagnostics.AddError(
 				fmt.Sprintf("Unable to protect Lima instance %q", name),
 				formatCommandError(err))
+			recordProtection(protection)
 			return
 		}
+		protection = true
 	}
 
 	inst, err := r.data.Service.Get(ctx, name)
@@ -752,6 +785,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 			fmt.Sprintf("Unable to read Lima instance %q after updating it", name),
 			formatCommandError(err)+
 				"\n\nThe update itself may have succeeded. Run `terraform refresh` to reconcile state.")
+		recordProtection(protection)
 		return
 	}
 
@@ -855,7 +889,7 @@ func (r *instanceResource) ImportState(ctx context.Context, req resource.ImportS
 		path  path.Path
 		value attr.Value
 	}{
-		{path.Root("instance_name"), types.StringValue(inst.Name)},
+		{path.Root(attrInstanceName), types.StringValue(inst.Name)},
 		{path.Root("name"), types.StringValue(logical)},
 		{path.Root("start"), types.BoolValue(inst.Status() == lima.StatusRunning)},
 		{path.Root("protect"), types.BoolValue(inst.Protected)},
@@ -968,6 +1002,39 @@ func (r *instanceResource) troubleshoot(name, operation string) string {
 	default:
 		return fmt.Sprintf("Inspect the instance with:\n\n    limactl list %s", name)
 	}
+}
+
+// recordAppliedResize writes state after a reconfiguration that succeeded but
+// left the instance down.
+//
+// The plan's configuration values are what Lima was given and accepted, so they
+// are recorded as-is. Everything else comes from a fresh read, and `start`
+// reflects what is actually true rather than what was asked for — the whole point
+// is that the instance is not running.
+func (r *instanceResource) recordAppliedResize(
+	ctx context.Context,
+	resp *resource.UpdateResponse,
+	plan *instanceModel,
+	lists declaredLists,
+	name string,
+	protection bool,
+) {
+	inst := r.bestEffortInstance(ctx, name)
+	plan.applyInstance(inst)
+
+	// applyInstance takes protect from the instance it read; if that read failed
+	// it is a placeholder, so the value tracked through the update wins.
+	plan.Protect = types.BoolValue(protection)
+
+	// Default to stopped, since the restart is what failed, and let a definitive
+	// observation override it.
+	plan.Start = observedStart(types.BoolValue(false), inst)
+
+	if _, hash, d := r.render(plan, lists); !d.HasError() {
+		plan.ConfigHash = types.StringValue(hash)
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
 // bestEffortInstance reads an instance, returning a minimal placeholder when

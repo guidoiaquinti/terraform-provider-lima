@@ -25,9 +25,11 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		// Replace this address before publishing to a registry namespace you
-		// control. It must match the source in required_providers and in any
-		// dev_overrides block.
+		// Derived from the repository, github.com/guidoiaquinti/terraform-provider-lima:
+		// the registry takes the namespace from the owner and the provider name
+		// from the repository name minus its terraform-provider- prefix. It must
+		// match the source in required_providers and in any dev_overrides block,
+		// and the namespace in the Makefile.
 		Address: "registry.terraform.io/guidoiaquinti/lima",
 		Debug:   debug,
 	}

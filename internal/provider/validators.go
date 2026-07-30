@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -126,7 +127,7 @@ func (v knownValueValidator) ValidateString(_ context.Context, req validator.Str
 			"The value must not be an empty string. Remove the attribute to use Lima's default.")
 		return
 	}
-	if lima.Contains(v.known, value) {
+	if slices.Contains(v.known, value) {
 		return
 	}
 	resp.Diagnostics.AddAttributeWarning(req.Path,
@@ -160,7 +161,7 @@ func (v requiredValueValidator) ValidateString(_ context.Context, req validator.
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
-	if !lima.Contains(v.allowed, req.ConfigValue.ValueString()) {
+	if !slices.Contains(v.allowed, req.ConfigValue.ValueString()) {
 		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Invalid %s", v.label),
 			fmt.Sprintf("%q is not a valid %s. Valid values are: %v.",
 				req.ConfigValue.ValueString(), v.label, v.allowed))

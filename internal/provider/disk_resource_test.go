@@ -35,7 +35,7 @@ func TestDiskResourceSchema(t *testing.T) {
 			t.Errorf("attribute %q should be required", name)
 		}
 	}
-	for _, name := range []string{"id", "actual_format", "dir", "mount_point", "in_use_by"} {
+	for _, name := range []string{"actual_format", "dir", "mount_point", "in_use_by"} {
 		attr, ok := resp.Schema.Attributes[name]
 		if !ok {
 			t.Errorf("schema is missing computed attribute %q", name)

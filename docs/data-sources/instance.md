@@ -43,7 +43,11 @@ data "lima_instance" "managed" {
 
 ### Read-only
 
-- `id` (String) The Lima instance name.
+There is deliberately **no `id`**. Lima exposes no object identifier of its own —
+`limactl list --list-fields` reports none, and the only UUID on disk belongs to the
+`vz` backend and to no `limactl` command — so an `id` could only repeat the name,
+which is Lima's actual primary key.
+
 - `status` (String) Normalised status: `running`, `stopped`, `creating`,
   `broken` or `unknown`. A status Lima introduces that this provider version does
   not recognise maps to `unknown`, with the original preserved in `raw_status`.

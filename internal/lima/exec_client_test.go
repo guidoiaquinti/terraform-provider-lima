@@ -112,26 +112,33 @@ func TestNewExecClientNotInPath(t *testing.T) {
 	}
 }
 
-func TestExecClientVersion(t *testing.T) {
+// DetectVersion reports the version and holds no state of its own.
+//
+// An earlier revision cached the result in a field on ExecClient, filled lazily
+// by a Version() method. One client is shared by every resource and Terraform
+// applies them in parallel, so that field was an unsynchronised write on a shared
+// value. It bought nothing: the provider detects the version once at
+// configuration time and keeps it in providerData. Asserting that each call
+// executes the command pins the absence of that hidden state.
+func TestExecClientDetectVersion(t *testing.T) {
 	t.Parallel()
 
 	fake := testutil.NewFakeLimactl()
 	c := newClient(t, fake)
 
-	v, err := c.Version(context.Background())
+	v, err := c.DetectVersion(context.Background())
 	if err != nil {
-		t.Fatalf("Version: %v", err)
+		t.Fatalf("DetectVersion: %v", err)
 	}
 	if v.Core() != "2.2.0" {
 		t.Errorf("version = %s, want 2.2.0", v.Core())
 	}
 
-	// The second call must be served from cache rather than re-executing.
-	if _, err := c.Version(context.Background()); err != nil {
-		t.Fatalf("second Version: %v", err)
+	if _, err := c.DetectVersion(context.Background()); err != nil {
+		t.Fatalf("second DetectVersion: %v", err)
 	}
-	if n := len(fake.CallsFor("--version")); n != 1 {
-		t.Errorf("--version was executed %d times, want 1 (result should be cached)", n)
+	if n := len(fake.CallsFor("--version")); n != 2 {
+		t.Errorf("--version was executed %d times, want 2: the adapter must be stateless", n)
 	}
 }
 
@@ -208,15 +215,91 @@ func TestExecClientInspectNotFound(t *testing.T) {
 	if !lima.IsNotFound(err) {
 		t.Error("IsNotFound did not recognise the error")
 	}
+}
 
-	// Inspect must resolve absence by listing everything, so Lima is never
-	// asked about a name that might not exist.
-	for _, call := range fake.CallsFor("list") {
-		for _, a := range call.Args {
-			if a == "missing" {
-				t.Errorf("Inspect passed the instance name to limactl: %v", call.Args)
-			}
+// Inspect asks Lima about the one name it wants.
+//
+// An earlier revision listed every instance and filtered in Go, to make absence
+// a structural fact rather than a string match. The cost was real: a single
+// create fanned out to roughly six full `list --all-fields` calls, each of which
+// makes Lima resolve the configuration of every instance in the home.
+//
+// It is not a trade-off, because a name-scoped list gives the same structural
+// signal — verified against Lima 2.2.0, an unknown name exits 1 and prints
+// nothing on stdout, so "the command failed and produced no object" identifies
+// absence without reading the message. TestExecClientInspectAbsenceIsStructural
+// pins that.
+func TestExecClientInspectIsNameScoped(t *testing.T) {
+	t.Parallel()
+
+	fake := testutil.NewFakeLimactl()
+	fake.Seed(testutil.FakeInstance{Name: "alpha"})
+	fake.Seed(testutil.FakeInstance{Name: "beta"})
+	c := newClient(t, fake)
+
+	if _, err := c.Inspect(context.Background(), "alpha"); err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+
+	calls := fake.CallsFor("list")
+	if len(calls) != 1 {
+		t.Fatalf("Inspect made %d list calls, want 1", len(calls))
+	}
+	var scoped bool
+	for _, a := range calls[0].Args {
+		if a == "alpha" {
+			scoped = true
 		}
+	}
+	if !scoped {
+		t.Errorf("Inspect listed without a name: %v", calls[0].Args)
+	}
+}
+
+// Absence must not depend on Lima's wording.
+//
+// The name-scoped path is only acceptable because "failed, and produced no
+// object" is itself the signal. Driving it with stderr that shares no words with
+// Lima's real message proves the classification is structural.
+func TestExecClientInspectAbsenceIsStructural(t *testing.T) {
+	t.Parallel()
+
+	fake := testutil.NewFakeLimactl()
+	fake.Seed(testutil.FakeInstance{Name: "alpha"})
+	fake.Script(testutil.Scripted{
+		Command:  "list",
+		Stdout:   "",
+		Stderr:   "level=fatal msg=\"totally different phrasing a future Lima might use\"\n",
+		ExitCode: 1,
+	})
+	c := newClient(t, fake)
+
+	_, err := c.Inspect(context.Background(), "alpha")
+	if !errors.Is(err, lima.ErrNotFound) {
+		t.Errorf("Inspect error = %v, want ErrNotFound from the empty result alone", err)
+	}
+}
+
+// A cancelled context must surface as cancellation, not as a missing instance.
+//
+// This is the trap in the name-scoped path: a cancelled command also exits
+// non-zero with no output, which looks exactly like absence.
+func TestExecClientInspectCancellationIsNotAbsence(t *testing.T) {
+	t.Parallel()
+
+	fake := testutil.NewFakeLimactl()
+	fake.Seed(testutil.FakeInstance{Name: "alpha"})
+	c := newClient(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := c.Inspect(ctx, "alpha")
+	if errors.Is(err, lima.ErrNotFound) {
+		t.Error("a cancelled Inspect was reported as a missing instance")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Inspect error = %v, want context.Canceled", err)
 	}
 }
 

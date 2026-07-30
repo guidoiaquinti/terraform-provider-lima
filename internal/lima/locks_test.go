@@ -122,11 +122,17 @@ func TestKeyedMutexReleasesOnError(t *testing.T) {
 	m := NewKeyedMutex()
 	ctx := context.Background()
 
-	err := m.WithLock(ctx, InstanceKey("dev"), func() error {
+	// The pattern every caller uses: acquire, defer the release, fail inside.
+	err := func() error {
+		unlock, err := m.Lock(ctx, InstanceKey("dev"))
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		return errors.New("boom")
-	})
+	}()
 	if err == nil || err.Error() != "boom" {
-		t.Fatalf("WithLock error = %v, want boom", err)
+		t.Fatalf("error = %v, want boom", err)
 	}
 
 	// The lock must be free again despite the failure.
@@ -153,9 +159,13 @@ func TestKeyedMutexReleasesOnPanic(t *testing.T) {
 
 	func() {
 		defer func() { _ = recover() }()
-		_ = m.WithLock(ctx, InstanceKey("dev"), func() error {
-			panic("boom")
-		})
+		unlock, err := m.Lock(ctx, InstanceKey("dev"))
+		if err != nil {
+			t.Errorf("Lock: %v", err)
+			return
+		}
+		defer unlock()
+		panic("boom")
 	}()
 
 	done := make(chan struct{})
@@ -218,8 +228,8 @@ func TestKeyNamespaces(t *testing.T) {
 	t.Parallel()
 
 	// Namespacing keeps an instance named "x" from colliding with a disk
-	// named "x".
-	if InstanceKey("x") == DiskKey("x") || DiskKey("x") == NetworkKey("x") {
+	// named "x", and both from colliding with the home-wide key.
+	if InstanceKey("x") == DiskKey("x") || InstanceKey("x") == HomeKey() || DiskKey("x") == HomeKey() {
 		t.Error("key namespaces collide")
 	}
 	if InstanceKey("dev") != "instance:dev" {

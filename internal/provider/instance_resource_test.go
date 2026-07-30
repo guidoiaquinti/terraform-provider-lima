@@ -436,7 +436,7 @@ func TestInstanceDataSourceModelMapping(t *testing.T) {
 	model.applyInstance(runningInstance(), "2.2.0")
 
 	checks := map[string]struct{ got, want any }{
-		"id":        {model.ID.ValueString(), "tfdisco"},
+		"name":      {model.Name.ValueString(), "tfdisco"},
 		"status":    {model.Status.ValueString(), "running"},
 		"cpus":      {model.CPUs.ValueInt64(), int64(8)},
 		"memory":    {model.Memory.ValueString(), "1GiB"},

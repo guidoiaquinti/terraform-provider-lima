@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -113,10 +114,10 @@ func accVMType(t *testing.T) string {
 	}
 	// Prefer the native backend where there is one; it is what a user on this
 	// host would get by default.
-	if info.HostOS == "darwin" && lima.Contains(info.VMTypes, "vz") {
+	if info.HostOS == "darwin" && slices.Contains(info.VMTypes, "vz") {
 		return "vz"
 	}
-	if lima.Contains(info.VMTypes, "qemu") {
+	if slices.Contains(info.VMTypes, "qemu") {
 		return "qemu"
 	}
 	if len(info.VMTypes) == 0 {
@@ -969,6 +970,49 @@ data "lima_instance" "test" {
 					resource.TestCheckResourceAttrSet("data.lima_instance.test", "memory"),
 					resource.TestCheckResourceAttrSet("data.lima_instance.test", "disk"),
 					resource.TestCheckResourceAttrSet("data.lima_instance.test", "lima_version"),
+				),
+			},
+		},
+	})
+}
+
+// lima_instances must find an instance the provider created, and report the same
+// values the singular data source does for it.
+//
+// The isolated acceptance home makes the list deterministic: exactly the
+// instances this test created are present, so an index of 0 is safe.
+func TestAccInstancesDataSource(t *testing.T) {
+	name := accName("dl")
+	t.Cleanup(func() { destroyInstance(t, name) })
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             checkLimaAbsent(t, name),
+		Steps: []resource.TestStep{
+			{
+				Config: accProviderConfig() + fmt.Sprintf(`
+resource "lima_instance" "test" {
+  name     = %q
+  template = %q
+  start    = false
+}
+
+data "lima_instances" "all" {
+  depends_on = [lima_instance.test]
+}
+`, name, accTemplate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.lima_instances.all", "instances.#", "1"),
+					resource.TestCheckResourceAttr("data.lima_instances.all", "instances.0.name", name),
+					resource.TestCheckResourceAttr("data.lima_instances.all", "instances.0.status", "stopped"),
+					resource.TestCheckResourceAttr("data.lima_instances.all", "instances.0.protected", "false"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.arch"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.vm_type"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.cpus"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.memory"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.disk"),
+					resource.TestCheckResourceAttrSet("data.lima_instances.all", "instances.0.lima_version"),
 				),
 			},
 		},

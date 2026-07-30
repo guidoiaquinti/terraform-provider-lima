@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/datasource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -30,7 +31,7 @@ func (d *hostDataSource) Configure(_ context.Context, req datasource.ConfigureRe
 	d.data = providerDataFrom(req.ProviderData, &resp.Diagnostics)
 }
 
-func (d *hostDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *hostDataSource) Schema(ctx context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	// Every attribute here is reported directly by `limactl info` or is
 	// already known to the provider. Capabilities that cannot be determined
 	// reliably are omitted rather than guessed: there is no "supports
@@ -40,10 +41,8 @@ func (d *hostDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 		MarkdownDescription: "Reports the capabilities of the local Lima installation, as detected by `limactl info`.\n\n" +
 			"Only values Lima actually reports are exposed; nothing is inferred from the host platform.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Identifier for this data source, set to the resolved `limactl` path.",
-			},
+			// No `id`: it held the resolved limactl path, which `binary_path` already
+			// reports under a name that says what it is.
 			"lima_version": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Lima version reported by `limactl info`.",
@@ -81,6 +80,7 @@ func (d *hostDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				ElementType:         types.StringType,
 				MarkdownDescription: "Names of every instance currently present in `LIMA_HOME`, whether or not Terraform manages them.",
 			},
+			"timeouts": timeouts.Attributes(ctx),
 		},
 	}
 }
@@ -92,7 +92,12 @@ func (d *hostDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
+	timeout, diags := config.Timeouts.Read(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	info, err := d.data.Client.Info(ctx)
@@ -116,7 +121,6 @@ func (d *hostDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		names = append(names, inst.Name)
 	}
 
-	config.ID = types.StringValue(d.data.Binary)
 	config.LimaVersion = types.StringValue(info.Version)
 	config.HostOS = optionalString(info.HostOS)
 	config.HostArch = optionalString(info.HostArch)

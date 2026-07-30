@@ -11,13 +11,33 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Changed
 
-- **Breaking.** `lima_instance` no longer has an `id` attribute. It held exactly
-  the same value as `instance_name` for the resource's whole life, so it was two
-  attributes for one fact; terraform-plugin-framework, unlike the older SDK, does
-  not require one. Replace `lima_instance.x.id` with
-  `lima_instance.x.instance_name`. Import is unaffected — the import ID is still
-  the real Lima instance name. `lima_disk` and the data sources keep their `id`
-  for now.
+- **Breaking.** No type has an `id` attribute any more — not `lima_instance`,
+  `lima_disk`, or any of the four data sources.
+
+  Lima exposes no object identifier of its own. `limactl list --list-fields`
+  reports 25 fields and none is an id: the closest, `AutoStartedIdentifier`, is an
+  auto-start registration label and is empty unless an instance was registered for
+  auto-start. The only UUID that exists is in `<LIMA_HOME>/<name>/vz-identifier`,
+  which no `limactl` command surfaces, which belongs to the `vz` backend alone
+  (a `qemu` instance has no equivalent), and which lives inside `LIMA_HOME` where
+  the provider does not reach. In Lima's model the **name is the primary key** —
+  it is the directory name, the `lima-<name>` hostname, the argument to every
+  command, and the import ID.
+
+  So an `id` here could only ever repeat a name, which is two attributes for one
+  fact. Migration is mechanical:
+
+  ```hcl
+  lima_instance.dev.id        → lima_instance.dev.instance_name
+  lima_disk.data.id           → lima_disk.data.name
+  data.lima_instance.dev.id   → data.lima_instance.dev.name
+  data.lima_disk.data.id      → data.lima_disk.data.name
+  data.lima_host.this.id      → data.lima_host.this.binary_path
+  ```
+
+  terraform-plugin-framework, unlike the older SDK, does not require an `id`.
+  Import is unaffected: the import ID is still the real Lima name. A test asserts
+  no type reintroduces one.
 - `config` and `config_overrides` are no longer marked sensitive. Marking them
   meant every change to the primary configuration attribute rendered as
   `(sensitive value)`, so a user editing one line of Lima YAML could not review
@@ -62,6 +82,56 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Fixed
 
+- A failed restart after a successful reconfiguration now records what was
+  applied. `limactl edit` succeeding and the following start failing is not a
+  failed change: the instance has the new resources and is simply down. State kept
+  the old values, so the next plan proposed a change that had already happened and
+  anyone reading state saw values the instance no longer had. The error already
+  explained the situation; state now agrees with it.
+- Instance lookups no longer list every instance in `LIMA_HOME`. `Inspect` listed
+  everything and filtered in Go so that absence was structural rather than a match
+  against Lima's error text, but that cost a full `--all-fields` listing per call —
+  five per create, each making Lima resolve the configuration of every instance in
+  the home. A name-scoped list gives the same structural signal, because a missing
+  name exits non-zero with **empty stdout** (measured against Lima 2.2.0), so
+  "failed and produced no object" identifies absence without reading the message.
+  Cancellation is checked first, since a cancelled command looks identical. Disk
+  lookups are unchanged: `limactl disk list` accepts no name argument.
+- A stray carriage return in a Lima log line no longer reaches a diagnostic,
+  where it would overwrite whatever the terminal had already drawn. The
+  hand-rolled unquoting always dropped `\r`; nothing tested it, so the behaviour
+  was invisible and easy to lose. It is now pinned by a test covering both the
+  fast path and the fallback.
+- Creating several instances at once in a fresh `LIMA_HOME` no longer fails. Lima
+  generates the shared SSH keypair in `_config/user` on first use by shelling out
+  to `ssh-keygen` with no locking, so concurrent first creates raced: verified
+  against Lima 2.2.0, four parallel `terraform apply` creates into an empty home
+  produced **one** instance and three failures. The per-instance lock could not
+  help, because the contended resource belongs to the home rather than to any
+  instance. Creates now serialise until one has succeeded, after which the keypair
+  exists and they run concurrently again — so the cost is paid once per process,
+  not on every create. The same configuration now creates all four.
+- A racing create is no longer reported as a name collision. The loser's message
+  is `<home>/_config/user already exists. Overwrite (y/n)?`, and the provider
+  matched a bare `already exists` substring, so it claimed the instance name was
+  taken and advised `terraform import` for an instance that did not exist. Lima
+  backtick-quotes the object in a genuine collision — ``instance `dev` already
+  exists`` — so the marker is now anchored on that. The disk marker had the same
+  flaw and got the same treatment.
+- A failed `lima_instance` update no longer leaves state claiming a protection the
+  instance does not have. Protection is cleared before the rest of an update and
+  reapplied afterwards, so that a protected instance can be reconfigured in one
+  apply — but a failure in between returned without writing state, leaving
+  `protect = true` recorded against an instance that had just been unprotected.
+  The read-back after a successful protection change had the mirror-image problem.
+  Both paths now record the protection actually in effect.
+- Removed an unsynchronised write on the shared `limactl` adapter. It cached the
+  detected Lima version in a struct field, filled lazily by `Version()`; one
+  adapter is shared by every resource and Terraform applies them in parallel, so
+  the write was a latent data race. It was safe only because nothing in the
+  provider called `Version()` — the version is detected once during configuration
+  and kept in `providerData`. The cache, the method and `CachedVersion()` are
+  gone, so the adapter now holds no mutable state at all.
 - The instance-name length check now runs for the **default** `LIMA_HOME`. It
   returned early whenever no `home` was configured — which is the default
   installation, and therefore most users — so the mid-apply
@@ -123,6 +193,32 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Added
 
+- `terraform-registry-manifest.json`, declaring protocol version 6. The Terraform
+  Registry reads the wire protocol from this file; without it a published release
+  is treated as an older-SDK provider and every `terraform init` against it fails.
+  GoReleaser now publishes it as a release asset under the name the registry looks
+  for, and a test asserts both, because nothing else would have caught the omission
+  before a release.
+- A `lima_instances` data source, reporting every instance in `LIMA_HOME` with the
+  same attributes as `lima_instance`. `lima_host` already reported instance names,
+  but only the names, so anything data-driven needed one `lima_instance` data
+  source per instance. There are deliberately no filter arguments — a Terraform
+  expression filters a list better than a bespoke argument, and each filter would
+  be another thing to keep consistent:
+
+  ```hcl
+  [for i in data.lima_instances.all.instances : i.name if i.status == "running"]
+  ```
+
+  Both instance data sources build their per-instance attributes from one shared
+  map, and a test asserts the two describe an instance identically.
+- All four data sources now accept a `timeouts` attribute with a `read` value.
+  Previously a lookup inherited the provider-wide `default_timeout`, so a
+  configuration that raised it to accommodate slow VM creation also gave a
+  one-second `limactl list` the same budget before it would be reported as stuck.
+- `default_timeout` is now validated at plan time as well as at configure time,
+  using the `Duration` validator that already existed but was never wired to
+  anything.
 - `ValidateConfig` warns when a configuration sets `plain: true` alongside
   `mount` or `port_forward` blocks. Lima ignores both outright in plain mode and
   never starts the guest agent that implements forwarding, so such a

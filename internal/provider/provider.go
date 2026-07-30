@@ -16,7 +16,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -153,6 +156,11 @@ func (p *limaProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 					"and `" + lima.DefaultTimeouts.Read.String() + "` to read. " +
 					"Setting this applies the same value to all four, so keep in mind that it raises the budget for a refresh as well as for a slow VM creation. " +
 					"May also be set with the `" + EnvDefaultTimeout + "` environment variable.",
+				// Catches a malformed duration during `terraform validate`,
+				// before the provider is configured. Configure still parses the
+				// value, because it also has to handle the environment variable,
+				// which no schema validator can see.
+				Validators: []validator.String{Duration()},
 			},
 			"name_prefix": schema.StringAttribute{
 				Optional: true,
@@ -330,6 +338,7 @@ func (p *limaProvider) Resources(context.Context) []func() resource.Resource {
 func (p *limaProvider) DataSources(context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewInstanceDataSource,
+		NewInstancesDataSource,
 		NewHostDataSource,
 		NewDiskDataSource,
 	}
@@ -350,16 +359,7 @@ func stringOrEnv(v types.String, envKey string) string {
 }
 
 func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j] < out[j-1]; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out
+	return slices.Sorted(maps.Keys(m))
 }
 
 // formatCommandError renders a Lima failure for a diagnostic body, keeping

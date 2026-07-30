@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -20,6 +21,11 @@ type Service struct {
 	client Client
 	locks  *KeyedMutex
 	poll   PollOptions
+
+	// setupMu guards sharedReady, which records that Lima's per-home
+	// initialisation has completed at least once. See awaitSharedSetup.
+	setupMu     sync.Mutex
+	sharedReady bool
 }
 
 // ServiceOption customises a Service.
@@ -89,6 +95,61 @@ type CreateResult struct {
 	Registered bool
 }
 
+// awaitSharedSetup serialises creates until Lima's per-home initialisation has
+// happened once.
+//
+// Lima generates the shared SSH keypair in `<LIMA_HOME>/_config/user` on first
+// use, by shelling out to ssh-keygen with no locking. Concurrent first creates
+// therefore race: one wins and the rest die with
+//
+//	failed to run [ssh-keygen ... -f <home>/_config/user]:
+//	"<home>/_config/user already exists.\nOverwrite (y/n)? ": exit status 1
+//
+// Verified against Lima 2.2.0 with four concurrent `limactl create` calls into an
+// empty home: one succeeded, three failed.
+//
+// The per-instance lock cannot help, because the contended resource belongs to
+// the home rather than to any instance. A home-wide lock held for every create
+// would fix it but would also serialise every future create, which is expensive
+// when each one takes minutes. So the lock is only taken until one create has
+// succeeded; after that the keypair exists and creates run concurrently again.
+//
+// The returned function must be called with whether the create succeeded.
+func (s *Service) awaitSharedSetup(ctx context.Context) (func(created bool), error) {
+	s.setupMu.Lock()
+	ready := s.sharedReady
+	s.setupMu.Unlock()
+	if ready {
+		return func(bool) {}, nil
+	}
+
+	// Taken before the per-instance lock, and always in that order, so the two
+	// cannot deadlock against each other.
+	unlock, err := s.locks.Lock(ctx, HomeKey())
+	if err != nil {
+		return nil, err
+	}
+
+	// Another create may have finished the setup while this one waited, in which
+	// case there is nothing left to serialise.
+	s.setupMu.Lock()
+	ready = s.sharedReady
+	s.setupMu.Unlock()
+	if ready {
+		unlock()
+		return func(bool) {}, nil
+	}
+
+	return func(created bool) {
+		if created {
+			s.setupMu.Lock()
+			s.sharedReady = true
+			s.setupMu.Unlock()
+		}
+		unlock()
+	}, nil
+}
+
 // Create registers an instance and brings it to the requested state.
 //
 // Partial failure is handled explicitly: if create succeeds but start fails,
@@ -98,6 +159,14 @@ type CreateResult struct {
 // recovery a provider should make on its own.
 func (s *Service) Create(ctx context.Context, p CreateParams) (CreateResult, error) {
 	var res CreateResult
+
+	// Held only until the first create anywhere in this process succeeds; see
+	// awaitSharedSetup.
+	releaseSetup, err := s.awaitSharedSetup(ctx)
+	if err != nil {
+		return res, err
+	}
+	defer func() { releaseSetup(res.Registered) }()
 
 	unlock, err := s.locks.Lock(ctx, InstanceKey(p.Name))
 	if err != nil {
@@ -578,7 +647,7 @@ func mergeMounts(resolved []MountView, previous, desired []Mount) []Mount {
 	copy(keep, resolved)
 
 	for _, prev := range previous {
-		if idx := indexOfMountLocation(keep, prev.Location); idx >= 0 {
+		if idx := indexByLocation(keep, prev.Location, mountViewLocation); idx >= 0 {
 			keep = append(keep[:idx], keep[idx+1:]...)
 		}
 	}
@@ -590,7 +659,7 @@ func mergeMounts(resolved []MountView, previous, desired []Mount) []Mount {
 	for _, m := range keep {
 		// A location the user now declares must not also survive as an
 		// inherited entry, or it would be mounted twice.
-		if indexOfMountLocation2(desired, m.Location) >= 0 {
+		if indexByLocation(desired, m.Location, mountLocation) >= 0 {
 			continue
 		}
 		out = append(out, Mount(m))
@@ -598,23 +667,39 @@ func mergeMounts(resolved []MountView, previous, desired []Mount) []Mount {
 	return out
 }
 
-func indexOfMountLocation(list []MountView, location string) int {
-	for i, m := range list {
-		if samePath(m.Location, location) {
+// indexByLocation finds the entry whose location matches, which is Lima's own
+// notion of mount identity.
+//
+// Generic over the element type because the configured (Mount) and resolved
+// (MountView) forms are distinct structs holding the same field; the accessor
+// keeps one implementation for both.
+func indexByLocation[T any](list []T, location string, locationOf func(T) string) int {
+	for i, e := range list {
+		if samePath(locationOf(e), location) {
 			return i
 		}
 	}
 	return -1
 }
 
-func indexOfMountLocation2(list []Mount, location string) int {
-	for i, m := range list {
-		if samePath(m.Location, location) {
+// indexByForward finds the entry with the same guest port and protocol, which is
+// forward identity: the host port is the field a user is most likely to change,
+// so including it would leave the old forward behind.
+func indexByForward[T any](list []T, guestPort int64, proto string, key func(T) (int64, string)) int {
+	for i, e := range list {
+		port, p := key(e)
+		if port == guestPort && normalizeProto(p) == normalizeProto(proto) {
 			return i
 		}
 	}
 	return -1
 }
+
+func mountViewLocation(m MountView) string { return m.Location }
+func mountLocation(m Mount) string         { return m.Location }
+
+func portForwardViewKey(p PortForwardView) (int64, string) { return p.GuestPort, p.Proto }
+func portForwardKey(p PortForward) (int64, string)         { return p.GuestPort, p.Proto }
 
 // mergePortForwards is mergeMounts for port forwards.
 //
@@ -626,7 +711,7 @@ func mergePortForwards(resolved []PortForwardView, previous, desired []PortForwa
 	copy(keep, resolved)
 
 	for _, prev := range previous {
-		if idx := indexOfForward(keep, prev.GuestPort, prev.Proto); idx >= 0 {
+		if idx := indexByForward(keep, prev.GuestPort, prev.Proto, portForwardViewKey); idx >= 0 {
 			keep = append(keep[:idx], keep[idx+1:]...)
 		}
 	}
@@ -634,7 +719,7 @@ func mergePortForwards(resolved []PortForwardView, previous, desired []PortForwa
 	out := make([]PortForward, 0, len(desired)+len(keep))
 	out = append(out, desired...)
 	for _, p := range keep {
-		if indexOfForward2(desired, p.GuestPort, p.Proto) >= 0 {
+		if indexByForward(desired, p.GuestPort, p.Proto, portForwardKey) >= 0 {
 			continue
 		}
 		out = append(out, PortForward{
@@ -653,24 +738,6 @@ func normalizeProto(p string) string {
 		return "tcp"
 	}
 	return strings.ToLower(p)
-}
-
-func indexOfForward(list []PortForwardView, guestPort int64, proto string) int {
-	for i, p := range list {
-		if p.GuestPort == guestPort && normalizeProto(p.Proto) == normalizeProto(proto) {
-			return i
-		}
-	}
-	return -1
-}
-
-func indexOfForward2(list []PortForward, guestPort int64, proto string) int {
-	for i, p := range list {
-		if p.GuestPort == guestPort && normalizeProto(p.Proto) == normalizeProto(proto) {
-			return i
-		}
-	}
-	return -1
 }
 
 // sameMounts reports whether a computed list already matches what Lima has,

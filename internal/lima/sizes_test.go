@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -108,32 +109,6 @@ func TestSizeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestNormalizeSize(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct{ input, want string }{
-		// Equivalent spellings must collapse to one canonical form so that
-		// "8192MiB" in config does not fight "8GiB" from Lima.
-		{"8192MiB", "8GiB"},
-		{"8GiB", "8GiB"},
-		{"8G", "8GiB"},
-		{"1024KiB", "1MiB"},
-		{"4 GiB", "4GiB"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			t.Parallel()
-			got, err := NormalizeSize(tc.input)
-			if err != nil {
-				t.Fatalf("NormalizeSize(%q) returned error: %v", tc.input, err)
-			}
-			if got != tc.want {
-				t.Errorf("NormalizeSize(%q) = %q, want %q", tc.input, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestValidateName(t *testing.T) {
 	t.Parallel()
 
@@ -233,17 +208,14 @@ func TestKnownValueTables(t *testing.T) {
 
 	// These come from `limactl info` and `limactl create --help` on Lima
 	// 2.2.0; they gate warnings, never hard failures.
-	if !Contains(KnownVMTypes, "vz") || !Contains(KnownVMTypes, "qemu") {
+	if !slices.Contains(KnownVMTypes, "vz") || !slices.Contains(KnownVMTypes, "qemu") {
 		t.Errorf("KnownVMTypes is missing a core backend: %v", KnownVMTypes)
 	}
-	if !Contains(KnownArches, "aarch64") || !Contains(KnownArches, "x86_64") {
+	if !slices.Contains(KnownArches, "aarch64") || !slices.Contains(KnownArches, "x86_64") {
 		t.Errorf("KnownArches is missing a core architecture: %v", KnownArches)
 	}
-	if !Contains(KnownProvisionModes, "system") || !Contains(KnownProvisionModes, "user") {
+	if !slices.Contains(KnownProvisionModes, "system") || !slices.Contains(KnownProvisionModes, "user") {
 		t.Errorf("KnownProvisionModes is missing a core mode: %v", KnownProvisionModes)
-	}
-	if Contains(KnownVMTypes, "nonsense") {
-		t.Error("Contains matched a value that is not present")
 	}
 }
 

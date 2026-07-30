@@ -57,6 +57,7 @@ provider "lima" {
 | Resource | [`lima_instance`](resources/instance.md) | A Lima virtual machine |
 | Resource | [`lima_disk`](resources/disk.md) | An additional Lima disk |
 | Data source | [`lima_instance`](data-sources/instance.md) | Read an existing instance |
+| Data source | [`lima_instances`](data-sources/instances.md) | Read every instance in `LIMA_HOME` |
 | Data source | [`lima_disk`](data-sources/disk.md) | Read an existing disk |
 | Data source | [`lima_host`](data-sources/host.md) | Detected host and Lima capabilities |
 
@@ -97,8 +98,9 @@ The provider never creates or removes this directory itself; only Lima does.
 
 Keep it short. Lima builds unix socket paths as
 `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` and enforces `UNIX_PATH_MAX = 104`.
-The provider validates this at plan time when `home` is set, so an over-long
-combination fails with a clear message instead of failing mid-apply.
+The provider validates this at plan time, so an over-long combination fails with
+a clear message instead of failing mid-apply. When `home` is unset the check runs
+against Lima's default `~/.lima`, so it applies to a default installation too.
 
 ### `environment`
 

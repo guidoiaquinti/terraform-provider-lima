@@ -167,21 +167,47 @@ After stopping a previously-running instance, `sshLocalPort` still reported
 `61627` and `sshAddress` still `127.0.0.1`. These are **last-known** values, not
 proof of a live endpoint. Documented as such in the resource docs.
 
-### 4.6 Not-found is exit 1 with a recognisable message
+### 4.6 Not-found is exit 1 with an *empty stdout*
 
 ```console
-$ limactl list --format json nosuch
+$ limactl list --format json --all-fields nosuch
 level=warning msg="No instance matching nosuch found."
 level=fatal msg="unmatched instances"
 $ echo $?
 1
 ```
 
-Detected via the `unmatched instances` / `No instance matching` markers on
-stderr. Because this is text matching, the provider **prefers** the
-list-everything-and-filter path: `limactl list --format json --all-fields`
-with no name argument never fails on absence, and absence is then a plain
-"name not in the decoded set". Name-scoped inspect is only a fallback.
+The important part is not the message but that **stdout is empty**. Measured
+against Lima 2.2.0:
+
+| Argument            | Exit | stdout            |
+| ------------------- | ---- | ----------------- |
+| an existing name    | 0    | one JSON object   |
+| a missing name      | 1    | *nothing*         |
+| existing + missing  | 1    | the existing one  |
+
+So a name-scoped lookup identifies absence **structurally** — "the command failed
+and produced no object" — without reading Lima's wording. That is what lets
+`Inspect` scope its list to the one name it wants, instead of listing every
+instance and filtering in Go. The earlier full-list approach was chosen to avoid
+text matching, but cost a full `--all-fields` listing per call: a single create
+issues five of them, each making Lima resolve the configuration of every instance
+in the home.
+
+Two caveats the implementation has to respect:
+
+- **A cancelled command looks identical**: non-zero exit, no output. Cancellation
+  is therefore checked first, or a timeout would be reported as a missing
+  instance.
+- **Name matching is exact.** `limactl list eucloud` does not match
+  `eucloud-global-1`, so a scoped list cannot return a different instance that
+  merely shares a prefix.
+
+The `unmatched instances` / `No instance matching` markers remain in `IsNotFound`
+as a fallback for errors that arrive by another route.
+
+`limactl disk list` takes **no** name argument, so disk lookups still list every
+disk and filter in Go. That is a Lima limitation, not a choice.
 
 ### 4.7 Status vocabulary
 
@@ -265,15 +291,52 @@ $ limactl create --tty=false --name=tfdisco t.yaml
 level=fatal msg="instance `tfdisco` already exists"
 ```
 
-The provider pre-checks with a list call and produces an import hint before
-ever invoking create.
+Note the backticks around the name. Lima quotes the object it is talking about
+in a genuine collision, and does **not** in its other "already exists" messages
+— see §5.4. The provider's marker is anchored on `` ` already exists`` for that
+reason.
 
-### 5.4 Create does not start
+Detection is structural first: the lifecycle layer checks for the instance under
+the instance lock and returns `ErrAlreadyExists`, which the resource renders as
+an import hint. The message match is only a fallback.
+
+### 5.4 Concurrent first creates race on the shared keypair
+
+Lima generates the per-home SSH keypair in `<LIMA_HOME>/_config/user` on first
+use, by shelling out to `ssh-keygen`, with no locking. Four concurrent creates
+into an empty home:
+
+```console
+$ for n in raw1 raw2 raw3 raw4; do limactl create --tty=false --name=$n t.yaml & done; wait
+$ limactl list --format '{{.Name}}'
+raw1
+```
+
+One succeeds. The others fail with:
+
+```text
+level=fatal msg="failed to run [ssh-keygen -t ed25519 -q -N  -C lima -f <home>/_config/user]:
+  \"<home>/_config/user already exists.\nOverwrite (y/n)? \": exit status 1"
+```
+
+Two consequences for the provider:
+
+- A per-instance lock cannot prevent this, because the contested resource
+  belongs to the home. `Service.awaitSharedSetup` serialises creates until one
+  has succeeded, then lets them run concurrently again, so the cost is paid once
+  per process rather than on every create.
+- The message contains "already exists" but is **not** a name collision. Matching
+  it as one made the provider advise `terraform import` for an instance that did
+  not exist, which is why the marker is backtick-anchored (§5.3).
+
+Measured against Lima 2.2.0.
+
+### 5.5 Create does not start
 
 Create leaves the instance `Stopped`. `start = false` therefore needs no extra
 work beyond not calling start.
 
-### 5.5 Instance name length is bounded by LIMA_HOME path length
+### 5.6 Instance name length is bounded by LIMA_HOME path length
 
 ```console
 $ LIMA_HOME=/very/long/path limactl create --name=tfdisco t.yaml

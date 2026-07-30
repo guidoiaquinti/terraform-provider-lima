@@ -87,7 +87,6 @@ resource "lima_disk" "test" {
 `, name),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("lima_disk.test", "name", name),
-					resource.TestCheckResourceAttr("lima_disk.test", "id", name),
 					resource.TestCheckResourceAttr("lima_disk.test", "size", "1GiB"),
 					resource.TestCheckResourceAttr("lima_disk.test", "mount_point", "/mnt/lima-"+name),
 					resource.TestCheckResourceAttrSet("lima_disk.test", "actual_format"),
@@ -187,6 +186,8 @@ resource "lima_disk" "test" {
 				// format, so the rest must round-trip exactly.
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"format", "timeouts"},
+				// The resource has no `id`, which is what this defaults to.
+				ImportStateVerifyIdentifierAttribute: "name",
 			},
 		},
 	})

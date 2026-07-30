@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -120,10 +121,22 @@ func SanitizeStderrLines(stderr string) []LogLine {
 
 // unquoteMessage decodes the Go-quoted msg= value. Lima escapes embedded
 // quotes, backticks are left as-is, and \n becomes a real newline.
+//
+// strconv.Unquote handles the well-formed case, which is nearly all of them. The
+// manual scan below remains as a fallback because Lima's msg= value is not always
+// a complete Go string literal — a truncated log line, or trailing key=value
+// pairs after the closing quote, both make Unquote fail where taking everything
+// up to the closing quote still yields the message.
 func unquoteMessage(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 || s[0] != '"' {
 		return s
+	}
+	if decoded, err := strconv.Unquote(s); err == nil {
+		// Unquote keeps a carriage return; the manual scan below drops it and so
+		// must this path. A stray \r in a diagnostic overwrites the line the
+		// terminal has already drawn.
+		return strings.ReplaceAll(decoded, "\r", "")
 	}
 	var b strings.Builder
 	for i := 1; i < len(s); i++ {
@@ -179,8 +192,15 @@ var (
 	protectedMarkers = []string{
 		"instance is protected",
 	}
+	// The backtick matters. Lima names the object in a genuine collision —
+	// "instance `dev` already exists" — while its other "already exists" messages
+	// do not. In particular, concurrent first-time creates race on the shared SSH
+	// keypair and the loser reports
+	// "<home>/_config/user already exists. Overwrite (y/n)?", which a bare
+	// "already exists" marker matched, so the provider claimed a name collision
+	// and told the user to import an instance that did not exist.
 	alreadyExistsMarkers = []string{
-		"already exists",
+		"` already exists",
 	}
 )
 

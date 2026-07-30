@@ -60,6 +60,13 @@ release:
   # Releases start as drafts so the changelog can be reviewed before publishing.
   draft: true
   prerelease: auto
+  extra_files:
+    # The Terraform Registry reads the protocol version from this file, and looks
+    # for it under exactly this name. Without it the registry assumes the older
+    # SDK protocol and every `terraform init` against the published provider
+    # fails, so it is a release asset rather than just a repository file.
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
 
 changelog:
   use: github

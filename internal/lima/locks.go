@@ -2,7 +2,6 @@ package lima
 
 import (
 	"context"
-	"fmt"
 	"sync"
 )
 
@@ -35,8 +34,13 @@ func InstanceKey(name string) string { return "instance:" + name }
 // DiskKey returns the lock key for a Lima disk.
 func DiskKey(name string) string { return "disk:" + name }
 
-// NetworkKey returns the lock key for a Lima network.
-func NetworkKey(name string) string { return "network:" + name }
+// HomeKey returns the lock key for LIMA_HOME itself.
+//
+// Some Lima state is per-home rather than per-instance. Most importantly, the
+// shared SSH keypair in `_config/user` is generated on first use by shelling out
+// to ssh-keygen with no locking, so concurrent first creates race and all but one
+// fail. See Service.Create.
+func HomeKey() string { return "home:" }
 
 // Lock acquires the lock for key, blocking until it is free or ctx is done.
 //
@@ -86,15 +90,4 @@ func (m *KeyedMutex) Lock(ctx context.Context, key string) (func(), error) {
 		release()
 		return func() {}, ctx.Err()
 	}
-}
-
-// WithLock runs fn while holding the lock for key. The lock is released even
-// if fn panics.
-func (m *KeyedMutex) WithLock(ctx context.Context, key string, fn func() error) error {
-	unlock, err := m.Lock(ctx, key)
-	if err != nil {
-		return fmt.Errorf("acquiring lock %q: %w", key, err)
-	}
-	defer unlock()
-	return fn()
 }

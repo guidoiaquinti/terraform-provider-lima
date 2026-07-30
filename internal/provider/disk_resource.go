@@ -84,11 +84,9 @@ func (r *diskResource) Schema(ctx context.Context, _ resource.SchemaRequest, res
 			}),
 
 			// Computed.
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The disk name, which is also the import ID.",
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-			},
+			// There is deliberately no `id`. Lima exposes no object identifier of its
+			// own — `limactl list --list-fields` has none — so an `id` here could only
+			// repeat `name`, which is Lima's actual primary key.
 			"actual_format": schema.StringAttribute{
 				Computed: true,
 				MarkdownDescription: "The format Lima reports for the stored image, which may differ from " +
@@ -337,7 +335,6 @@ func (r *diskResource) ImportState(ctx context.Context, req resource.ImportState
 		path  path.Path
 		value attr.Value
 	}{
-		{path.Root("id"), types.StringValue(disk.Name)},
 		{path.Root("name"), types.StringValue(disk.Name)},
 		{path.Root("size"), types.StringValue(lima.FormatSize(disk.SizeBytes))},
 		{path.Root("actual_format"), optionalString(disk.Format)},

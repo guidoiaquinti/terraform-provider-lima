@@ -1,6 +1,7 @@
 package lima
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -51,11 +52,11 @@ func (v Version) Core() string {
 func (v Version) Compare(o Version) int {
 	switch {
 	case v.Major != o.Major:
-		return sign(v.Major - o.Major)
+		return cmp.Compare(v.Major, o.Major)
 	case v.Minor != o.Minor:
-		return sign(v.Minor - o.Minor)
+		return cmp.Compare(v.Minor, o.Minor)
 	case v.Patch != o.Patch:
-		return sign(v.Patch - o.Patch)
+		return cmp.Compare(v.Patch, o.Patch)
 	}
 	return 0
 }
@@ -65,16 +66,6 @@ func (v Version) AtLeast(o Version) bool { return v.Compare(o) >= 0 }
 
 // NewerThan reports whether v is strictly newer than o.
 func (v Version) NewerThan(o Version) bool { return v.Compare(o) > 0 }
-
-func sign(n int) int {
-	switch {
-	case n < 0:
-		return -1
-	case n > 0:
-		return 1
-	}
-	return 0
-}
 
 // limactl --version prints exactly:
 //

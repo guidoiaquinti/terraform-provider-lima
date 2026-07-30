@@ -33,9 +33,6 @@ import "context"
 //   - Validate, Protect, Unprotect and Info were added; each has a real,
 //     scriptable command behind it.
 type Client interface {
-	// Version returns the Lima version detected at configuration time.
-	Version(ctx context.Context) (Version, error)
-
 	// Info returns host capabilities from `limactl info`.
 	Info(ctx context.Context) (HostInfo, error)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/datasource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -31,7 +32,7 @@ func (d *diskDataSource) Configure(_ context.Context, req datasource.ConfigureRe
 	d.data = providerDataFrom(req.ProviderData, &resp.Diagnostics)
 }
 
-func (d *diskDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *diskDataSource) Schema(ctx context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Reads an existing Lima disk. This data source never modifies the disk.",
 		Attributes: map[string]schema.Attribute{
@@ -40,10 +41,9 @@ func (d *diskDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				MarkdownDescription: "The disk name, exactly as `limactl disk list` reports it.",
 				Validators:          []validator.String{InstanceName()},
 			},
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The disk name.",
-			},
+			// There is deliberately no `id`. Lima exposes no object identifier of its
+			// own — `limactl list --list-fields` has none — so an `id` here could only
+			// repeat `name`, which is Lima's actual primary key.
 			"size": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Disk size in IEC notation, for example `50GiB`.",
@@ -70,6 +70,7 @@ func (d *diskDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				MarkdownDescription: "Name of the **running** instance holding this disk, or null. " +
 					"A disk attached to a stopped instance reports null.",
 			},
+			"timeouts": timeouts.Attributes(ctx),
 		},
 	}
 }
@@ -81,7 +82,12 @@ func (d *diskDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
+	timeout, diags := config.Timeouts.Read(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	name := config.Name.ValueString()

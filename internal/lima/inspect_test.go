@@ -3,6 +3,7 @@ package lima
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -243,7 +244,7 @@ func TestParseHostInfo(t *testing.T) {
 			t.Errorf("UserTemplates leaked internal template %q", n)
 		}
 	}
-	if !Contains(names, "ubuntu") || !Contains(names, "docker") {
+	if !slices.Contains(names, "ubuntu") || !slices.Contains(names, "docker") {
 		t.Errorf("template names = %v, want ubuntu and docker", names)
 	}
 }

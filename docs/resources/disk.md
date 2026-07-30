@@ -60,7 +60,11 @@ output "guest_path" {
 
 ### Read-only
 
-- `id` (String) The disk name.
+There is deliberately **no `id`**. Lima exposes no object identifier of its own —
+`limactl list --list-fields` reports none, and the only UUID on disk belongs to the
+`vz` backend and to no `limactl` command — so an `id` could only repeat the name,
+which is Lima's actual primary key.
+
 - `actual_format` (String) The format Lima reports for the stored image.
 - `dir` (String) The disk's directory inside `LIMA_HOME`, normally
   `_disks/<name>`.

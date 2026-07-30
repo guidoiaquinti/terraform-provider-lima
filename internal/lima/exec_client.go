@@ -52,12 +52,17 @@ func (execRunner) Run(ctx context.Context, binary string, args []string, env []s
 }
 
 // ExecClient is the limactl command adapter.
+//
+// It holds no mutable state. An earlier revision cached the detected version in
+// a field that Version() filled lazily, which was a data race waiting to happen:
+// one client is shared by every resource and Terraform applies them in parallel.
+// The version is detected once during provider configuration and kept in
+// providerData instead, so nothing here needs to be written after construction.
 type ExecClient struct {
-	binary  string
-	home    string
-	env     map[string]string
-	runner  Runner
-	version Version
+	binary string
+	home   string
+	env    map[string]string
+	runner Runner
 }
 
 // Options configures an ExecClient.
@@ -150,9 +155,6 @@ func (c *ExecClient) Binary() string { return c.binary }
 // Home returns the configured LIMA_HOME, which may be empty.
 func (c *ExecClient) Home() string { return c.home }
 
-// CachedVersion returns the version recorded by DetectVersion.
-func (c *ExecClient) CachedVersion() Version { return c.version }
-
 // run executes limactl and converts a non-zero exit into a CommandError.
 func (c *ExecClient) run(ctx context.Context, args []string) (string, error) {
 	env := buildEnv(os.Environ(), c.home, c.env)
@@ -199,15 +201,10 @@ func (c *ExecClient) run(ctx context.Context, args []string) (string, error) {
 	return stdout, nil
 }
 
-// Version implements Client.
-func (c *ExecClient) Version(ctx context.Context) (Version, error) {
-	if c.version.Raw != "" {
-		return c.version, nil
-	}
-	return c.DetectVersion(ctx)
-}
-
-// DetectVersion runs `limactl --version` and caches the result.
+// DetectVersion runs `limactl --version`.
+//
+// The result is not cached here; the provider detects the version once at
+// configuration time and keeps it in providerData. See the type comment.
 func (c *ExecClient) DetectVersion(ctx context.Context) (Version, error) {
 	stdout, err := c.run(ctx, versionArgs())
 	if err != nil {
@@ -217,7 +214,6 @@ func (c *ExecClient) DetectVersion(ctx context.Context) (Version, error) {
 	if err != nil {
 		return Version{}, err
 	}
-	c.version = v
 	tflog.Debug(ctx, "detected Lima version", map[string]any{"version": v.String()})
 	return v, nil
 }
@@ -244,14 +240,40 @@ func (c *ExecClient) List(ctx context.Context) ([]Instance, error) {
 
 // Inspect implements Client.
 //
-// It lists everything and filters in Go rather than passing the name to Lima.
-// Lima exits non-zero with a text-only message for an unknown name; listing
-// makes absence a structural fact instead of a string match.
+// The list is scoped to the one name being asked about. An earlier revision
+// listed every instance and filtered in Go, so that absence was a structural
+// fact rather than a match against Lima's error text — but that made a single
+// create cost roughly six full `list --all-fields` calls, each of which resolves
+// the configuration of every instance in the home.
+//
+// Scoping keeps the structural guarantee. Verified against Lima 2.2.0: an
+// unknown name exits 1 and writes nothing to stdout, so "the command failed and
+// produced no object" identifies absence without reading the message. Matching on
+// Lima's wording remains only a fallback, in IsNotFound.
+//
+// Name matching is exact, so a scoped list cannot return a different instance
+// that merely shares a prefix; the loop below re-checks anyway.
 func (c *ExecClient) Inspect(ctx context.Context, name string) (Instance, error) {
-	instances, err := c.List(ctx)
-	if err != nil {
+	stdout, err := c.run(ctx, listArgs(name))
+
+	// A cancelled command also exits non-zero with no output, which is
+	// indistinguishable from absence by shape alone. Cancellation wins.
+	if err != nil && isCancellation(err) {
 		return Instance{}, err
 	}
+
+	instances, parseErr := ParseInstancesString(stdout)
+	if err != nil {
+		if parseErr == nil && len(instances) == 0 {
+			return Instance{}, fmt.Errorf("%w: %q", ErrNotFound, name)
+		}
+		// Lima failed for some other reason; that error is the useful one.
+		return Instance{}, err
+	}
+	if parseErr != nil {
+		return Instance{}, parseErr
+	}
+
 	for _, inst := range instances {
 		if inst.Name == name {
 			return inst, nil

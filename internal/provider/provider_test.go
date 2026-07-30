@@ -10,6 +10,7 @@ import (
 	"time"
 
 	fwdatasource "github.com/hashicorp/terraform-plugin-framework/datasource"
+	dsschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -101,7 +102,7 @@ func TestProviderRegistersResourcesAndDataSources(t *testing.T) {
 		fn().Metadata(ctx, fwdatasource.MetadataRequest{ProviderTypeName: "lima"}, dResp)
 		gotDataSources[dResp.TypeName] = true
 	}
-	wantDataSources := []string{"lima_instance", "lima_host", "lima_disk"}
+	wantDataSources := []string{"lima_instance", "lima_instances", "lima_host", "lima_disk"}
 	for _, want := range wantDataSources {
 		if !gotDataSources[want] {
 			t.Errorf("data source %q is not registered; got %v", want, gotDataSources)
@@ -109,6 +110,44 @@ func TestProviderRegistersResourcesAndDataSources(t *testing.T) {
 	}
 	if len(gotDataSources) != len(wantDataSources) {
 		t.Errorf("provider registers %v, want exactly %v", gotDataSources, wantDataSources)
+	}
+}
+
+// The lima_instance and lima_instances data sources must describe an instance
+// with the same attributes, or a user moving between them would find fields
+// missing. Both build from instanceObservedAttributes; this asserts neither has
+// grown a private addition.
+func TestInstanceDataSourcesAgreeOnAttributes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	single := &fwdatasource.SchemaResponse{}
+	NewInstanceDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, single)
+	plural := &fwdatasource.SchemaResponse{}
+	NewInstancesDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, plural)
+
+	nested, ok := plural.Schema.Attributes["instances"].(dsschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("lima_instances.instances is %T, want a ListNestedAttribute", plural.Schema.Attributes["instances"])
+	}
+
+	// `timeouts` belongs to the data source rather than to an instance. `name` is
+	// checked: it is Required on the singular and Computed on an entry, but it
+	// must be present on both or a list entry could not be identified.
+	skip := map[string]bool{"timeouts": true}
+
+	for name := range single.Schema.Attributes {
+		if skip[name] {
+			continue
+		}
+		if _, ok := nested.NestedObject.Attributes[name]; !ok {
+			t.Errorf("lima_instance exposes %q but a lima_instances entry does not", name)
+		}
+	}
+	for name := range nested.NestedObject.Attributes {
+		if _, ok := single.Schema.Attributes[name]; !ok {
+			t.Errorf("a lima_instances entry exposes %q but lima_instance does not", name)
+		}
 	}
 }
 
@@ -179,6 +218,53 @@ func TestInstanceResourceSchema(t *testing.T) {
 	}
 }
 
+// Lima exposes no object identifier: `limactl list --list-fields` has none, and
+// the only UUID on disk belongs to the vz backend and to no limactl command. An
+// `id` attribute could therefore only repeat `name`, which is Lima's real primary
+// key, so no type carries one.
+func TestNoTypeCarriesADuplicateID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resources := map[string]*fwresource.SchemaResponse{
+		"lima_instance": {},
+		"lima_disk":     {},
+	}
+	NewInstanceResource().Schema(ctx, fwresource.SchemaRequest{}, resources["lima_instance"])
+	NewDiskResource().Schema(ctx, fwresource.SchemaRequest{}, resources["lima_disk"])
+	for name, resp := range resources {
+		if _, ok := resp.Schema.Attributes["id"]; ok {
+			t.Errorf("resource %s has an `id` attribute; use its name attribute instead", name)
+		}
+	}
+
+	dataSources := map[string]*fwdatasource.SchemaResponse{
+		"lima_instance":  {},
+		"lima_instances": {},
+		"lima_disk":      {},
+		"lima_host":      {},
+	}
+	NewInstanceDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, dataSources["lima_instance"])
+	NewInstancesDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, dataSources["lima_instances"])
+	NewDiskDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, dataSources["lima_disk"])
+	NewHostDataSource().Schema(ctx, fwdatasource.SchemaRequest{}, dataSources["lima_host"])
+	for name, resp := range dataSources {
+		if _, ok := resp.Schema.Attributes["id"]; ok {
+			t.Errorf("data source %s has an `id` attribute", name)
+		}
+	}
+
+	// Including inside a lima_instances entry, which is the easiest place to
+	// reintroduce one by accident.
+	nested, ok := dataSources["lima_instances"].Schema.Attributes["instances"].(dsschema.ListNestedAttribute)
+	if !ok {
+		t.Fatal("lima_instances.instances is not a ListNestedAttribute")
+	}
+	if _, ok := nested.NestedObject.Attributes["id"]; ok {
+		t.Error("a lima_instances entry has an `id` attribute")
+	}
+}
+
 func TestSensitiveAttributesAreMarked(t *testing.T) {
 	t.Parallel()
 
@@ -239,7 +325,7 @@ func TestHostDataSourceSchema(t *testing.T) {
 		t.Fatalf("host data source schema produced errors: %v", resp.Diagnostics)
 	}
 	for _, name := range []string{
-		"id", "lima_version", "host_os", "host_arch", "vm_types",
+		"lima_version", "host_os", "host_arch", "vm_types",
 		"lima_home", "binary_path", "templates", "instance_names",
 	} {
 		attr, ok := resp.Schema.Attributes[name]
@@ -650,9 +736,22 @@ func TestEveryAttributeIsDescribed(t *testing.T) {
 
 	for name, resp := range dataSchemas {
 		for attrName, attr := range resp.Schema.Attributes {
+			// timeouts is framework plumbing, described by the timeouts package
+			// rather than by this provider, exactly as for the resources above.
+			if attrName == "timeouts" {
+				continue
+			}
 			if attr.GetMarkdownDescription() == "" {
 				t.Errorf("%s data source attribute %q has no description", name, attrName)
 			}
+		}
+	}
+
+	// Every data source should honour a read timeout; a lookup that hangs must be
+	// interruptible without waiting out a create-sized budget.
+	for name, resp := range dataSchemas {
+		if _, ok := resp.Schema.Attributes["timeouts"]; !ok {
+			t.Errorf("%s data source has no timeouts attribute", name)
 		}
 	}
 }

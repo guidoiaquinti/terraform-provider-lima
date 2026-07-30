@@ -72,16 +72,6 @@ func FormatSize(bytes int64) string {
 	return strconv.FormatInt(bytes, 10) + "B"
 }
 
-// NormalizeSize canonicalises a size string, so "8192MiB" and "8GiB" both
-// become "8GiB" and cannot cause a spurious diff.
-func NormalizeSize(s string) (string, error) {
-	b, err := ParseSize(s)
-	if err != nil {
-		return "", err
-	}
-	return FormatSize(b), nil
-}
-
 // gibiByte is the divisor for Lima's --memory and --disk flags, which take
 // GiB rather than an IEC string.
 const gibiByte = 1 << 30
@@ -214,13 +204,3 @@ var KnownArches = []string{"x86_64", "aarch64", "riscv64", "armv7l", "s390x", "p
 
 // KnownProvisionModes are Lima's provisioning modes.
 var KnownProvisionModes = []string{"system", "user", "boot", "dependency", "ansible", "data"}
-
-// Contains reports whether list holds v.
-func Contains(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
-}
