@@ -1052,17 +1052,21 @@ resource "lima_instance" "test" {
   template = %q
   start    = false
 
-  mount {
-    location    = %q
-    mount_point = "/workspace"
-    writable    = true
-  }
+  mounts = [
+    {
+      location    = %q
+      mount_point = "/workspace"
+      writable    = true
+    },
+  ]
 
-  port_forward {
-    guest_port = 8080
-    host_port  = 18080
-    protocol   = "tcp"
-  }
+  port_forwards = [
+    {
+      guest_port = 8080
+      host_port  = 18080
+      protocol   = "tcp"
+    },
+  ]
 }
 `, name, accTemplate, shared)
 
@@ -1074,8 +1078,8 @@ resource "lima_instance" "test" {
 			{
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("lima_instance.test", "mount.0.mount_point", "/workspace"),
-					resource.TestCheckResourceAttr("lima_instance.test", "port_forward.0.host_port", "18080"),
+					resource.TestCheckResourceAttr("lima_instance.test", "mounts.0.mount_point", "/workspace"),
+					resource.TestCheckResourceAttr("lima_instance.test", "port_forwards.0.host_port", "18080"),
 					// The configured entries must be found in Lima's resolved
 					// configuration, alongside whatever the template added.
 					checkLimaHasMount(t, name, shared, "/workspace", true),
@@ -1154,16 +1158,20 @@ resource "lima_instance" %q {
   template = %q
   start    = false
 
-  mount {
-    location    = %q
-    mount_point = %q
-    writable    = true
-  }
+  mounts = [
+    {
+      location    = %q
+      mount_point = %q
+      writable    = true
+    },
+  ]
 
-  port_forward {
-    guest_port = %d
-    host_port  = %d
-  }
+  port_forwards = [
+    {
+      guest_port = %d
+      host_port  = %d
+    },
+  ]
 }
 `, name, name, accTemplate, location, mountPoint, guestPort, guestPort+10000)
 	}
@@ -1255,11 +1263,13 @@ resource "lima_instance" "test" {
   template = %q
   start    = false
 
-  mount {
-    location    = %q
-    mount_point = "/workspace"
-    writable    = true
-  }
+  mounts = [
+    {
+      location    = %q
+      mount_point = "/workspace"
+      writable    = true
+    },
+  ]
 }
 `, name, accTemplate, declared)
 

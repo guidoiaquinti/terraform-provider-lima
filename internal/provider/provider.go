@@ -46,9 +46,6 @@ const (
 	EnvDefaultTimeout = "LIMA_PROVIDER_DEFAULT_TIMEOUT"
 )
 
-// DefaultTimeout is used when neither the provider nor the resource sets one.
-const DefaultTimeout = 20 * time.Minute
-
 // Ensure the implementation satisfies the framework interfaces.
 var (
 	_ provider.Provider              = (*limaProvider)(nil)
@@ -84,8 +81,26 @@ type providerData struct {
 	Binary string
 	// NamePrefix is prepended to instance names the provider creates.
 	NamePrefix string
-	// DefaultTimeout applies when a resource sets no explicit timeout.
+	// DefaultTimeout is the provider-wide override for every operation that
+	// sets no explicit timeout. Zero means none was configured, in which case
+	// each operation uses its own default from lima.DefaultTimeouts.
 	DefaultTimeout time.Duration
+}
+
+// timeout returns the provider-wide default when one was configured, and the
+// per-operation default otherwise.
+//
+// The distinction matters in both directions. Without a configured value, a
+// refresh must not be given the budget a VM creation needs; with one, the user
+// has asked for a single number to govern everything.
+//
+// A nil receiver is valid: Terraform calls schema and validation methods before
+// Configure runs, so resources reach for this with no provider data yet.
+func (d *providerData) timeout(perOperation time.Duration) time.Duration {
+	if d != nil && d.DefaultTimeout > 0 {
+		return d.DefaultTimeout
+	}
+	return perOperation
 }
 
 // providerModel mirrors the provider schema.
@@ -132,8 +147,11 @@ func (p *limaProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 			},
 			"default_timeout": schema.StringAttribute{
 				Optional: true,
-				MarkdownDescription: "Fallback timeout for operations that do not set their own, as a Go duration such as `20m` or `1h30m`. " +
-					"Defaults to `" + DefaultTimeout.String() + "`. " +
+				MarkdownDescription: "Overrides the timeout of every operation that does not set its own, as a Go duration such as `20m` or `1h30m`. " +
+					"When unset, each operation uses its own default: `" + lima.DefaultTimeouts.Create.String() + "` to create, " +
+					"`" + lima.DefaultTimeouts.Update.String() + "` to update, `" + lima.DefaultTimeouts.Delete.String() + "` to delete " +
+					"and `" + lima.DefaultTimeouts.Read.String() + "` to read. " +
+					"Setting this applies the same value to all four, so keep in mind that it raises the budget for a refresh as well as for a slow VM creation. " +
 					"May also be set with the `" + EnvDefaultTimeout + "` environment variable.",
 			},
 			"name_prefix": schema.StringAttribute{
@@ -181,7 +199,9 @@ func (p *limaProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	home := stringOrEnv(config.Home, EnvHome)
 	namePrefix := stringOrEnv(config.NamePrefix, EnvNamePrefix)
 
-	timeout := DefaultTimeout
+	// Left at zero when nothing was configured, which is what lets each
+	// operation fall back to its own default rather than to one shared number.
+	var timeout time.Duration
 	if raw := stringOrEnv(config.DefaultTimeout, EnvDefaultTimeout); raw != "" {
 		parsed, err := time.ParseDuration(raw)
 		if err != nil {

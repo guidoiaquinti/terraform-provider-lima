@@ -81,7 +81,7 @@ func (d *diskDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, d.data.DefaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
 	defer cancel()
 
 	name := config.Name.ValueString()

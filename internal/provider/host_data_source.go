@@ -6,6 +6,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/guidoiaquinti/terraform-provider-lima/internal/lima"
 )
 
 var (
@@ -90,7 +92,7 @@ func (d *hostDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, d.data.DefaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
 	defer cancel()
 
 	info, err := d.data.Client.Info(ctx)

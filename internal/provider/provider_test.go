@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	fwdatasource "github.com/hashicorp/terraform-plugin-framework/datasource"
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
@@ -155,10 +156,20 @@ func TestInstanceResourceSchema(t *testing.T) {
 		t.Error("name should be required")
 	}
 
-	for _, name := range []string{"mount", "port_forward", "provision"} {
-		if _, ok := resp.Schema.Blocks[name]; !ok {
-			t.Errorf("schema is missing the %q block", name)
+	// Nested attributes rather than blocks, so a user can build them with a
+	// `for` expression instead of a `dynamic` block.
+	for _, name := range []string{attrMounts, attrPortForwards, attrProvisions} {
+		attr, ok := resp.Schema.Attributes[name]
+		if !ok {
+			t.Errorf("schema is missing the %q attribute", name)
+			continue
 		}
+		if _, ok := attr.(schema.ListNestedAttribute); !ok {
+			t.Errorf("attribute %q is %T, want schema.ListNestedAttribute", name, attr)
+		}
+	}
+	if len(resp.Schema.Blocks) != 0 {
+		t.Errorf("schema declares blocks %v; the resource is attribute-only", resp.Schema.Blocks)
 	}
 }
 
@@ -176,16 +187,16 @@ func TestSensitiveAttributesAreMarked(t *testing.T) {
 	}
 
 	// Provisioning script bodies must never appear in plan output.
-	block, ok := resp.Schema.Blocks["provision"].(schema.ListNestedBlock)
+	provisions, ok := resp.Schema.Attributes[attrProvisions].(schema.ListNestedAttribute)
 	if !ok {
-		t.Fatalf("provision block has unexpected type %T", resp.Schema.Blocks["provision"])
+		t.Fatalf("%s has unexpected type %T", attrProvisions, resp.Schema.Attributes[attrProvisions])
 	}
-	script, ok := block.NestedObject.Attributes["script"]
+	script, ok := provisions.NestedObject.Attributes["script"]
 	if !ok {
-		t.Fatal("provision block has no script attribute")
+		t.Fatalf("%s has no script attribute", attrProvisions)
 	}
 	if !script.IsSensitive() {
-		t.Error("provision.script should be marked sensitive")
+		t.Errorf("%s[].script should be marked sensitive", attrProvisions)
 	}
 }
 
@@ -427,6 +438,12 @@ func TestMutabilityMatchesDocumentation(t *testing.T) {
 		"disk":    false,
 		"start":   false,
 		"protect": false,
+		// mounts and port_forwards are reconciled in place via
+		// `limactl edit --set`. provisions cannot be: Lima has no way to re-run
+		// provisioning on an existing instance, so changing it must rebuild the VM.
+		attrMounts:       false,
+		attrPortForwards: false,
+		attrProvisions:   true,
 	}
 
 	resp := &fwresource.SchemaResponse{}
@@ -447,31 +464,40 @@ func TestMutabilityMatchesDocumentation(t *testing.T) {
 				name, got, want)
 		}
 	}
+}
 
-	// mount and port_forward are reconciled in place via `limactl edit --set`.
-	// provision cannot be: Lima has no way to re-run provisioning on an
-	// existing instance, so changing it must rebuild the VM.
-	wantBlockReplace := map[string]bool{
-		"mount":        false,
-		"port_forward": false,
-		"provision":    true,
+// The provider-wide default_timeout is an override, not a floor. When it is
+// unset each operation must get its own documented default; a read in particular
+// must not inherit the half-hour budget a VM creation needs.
+//
+// This was silently broken: providerData.DefaultTimeout was always non-zero, so
+// the per-operation fallbacks were unreachable and every operation, including
+// refresh, ran on the same 20-minute budget.
+func TestProviderDataTimeoutPrefersPerOperationDefault(t *testing.T) {
+	t.Parallel()
+
+	unset := &providerData{}
+	if got := unset.timeout(lima.DefaultTimeouts.Read); got != lima.DefaultTimeouts.Read {
+		t.Errorf("unset default_timeout: read = %s, want %s", got, lima.DefaultTimeouts.Read)
 	}
-	for name, want := range wantBlockReplace {
-		block, ok := resp.Schema.Blocks[name].(schema.ListNestedBlock)
-		if !ok {
-			t.Errorf("block %q is missing or not a ListNestedBlock", name)
-			continue
+	if got := unset.timeout(lima.DefaultTimeouts.Create); got != lima.DefaultTimeouts.Create {
+		t.Errorf("unset default_timeout: create = %s, want %s", got, lima.DefaultTimeouts.Create)
+	}
+
+	configured := &providerData{DefaultTimeout: 90 * time.Minute}
+	for _, per := range []time.Duration{
+		lima.DefaultTimeouts.Create, lima.DefaultTimeouts.Update,
+		lima.DefaultTimeouts.Delete, lima.DefaultTimeouts.Read,
+	} {
+		if got := configured.timeout(per); got != 90*time.Minute {
+			t.Errorf("configured default_timeout: timeout(%s) = %s, want 1h30m", per, got)
 		}
-		got := false
-		for _, m := range block.PlanModifiers {
-			if isRequiresReplace(m) {
-				got = true
-			}
-		}
-		if got != want {
-			t.Errorf("block %q forces replacement = %v, want %v (update the mutability tables if intended)",
-				name, got, want)
-		}
+	}
+
+	// Resources reach for this before Configure has run.
+	var nilData *providerData
+	if got := nilData.timeout(lima.DefaultTimeouts.Read); got != lima.DefaultTimeouts.Read {
+		t.Errorf("nil providerData: timeout = %s, want %s", got, lima.DefaultTimeouts.Read)
 	}
 }
 
@@ -489,6 +515,17 @@ func hasRequiresReplace(attr schema.Attribute) bool {
 			modifiers = append(modifiers, m)
 		}
 	case schema.BoolAttribute:
+		for _, m := range a.PlanModifiers {
+			modifiers = append(modifiers, m)
+		}
+	// The list cases matter as much as the scalar ones: without them a
+	// ListNestedAttribute reports "no replacement" whatever its modifiers say,
+	// so `provisions` would pass against a "Replace" row purely by accident.
+	case schema.ListNestedAttribute:
+		for _, m := range a.PlanModifiers {
+			modifiers = append(modifiers, m)
+		}
+	case schema.ListAttribute:
 		for _, m := range a.PlanModifiers {
 			modifiers = append(modifiers, m)
 		}

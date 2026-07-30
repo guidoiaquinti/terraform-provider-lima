@@ -117,13 +117,26 @@ redacted anywhere a key/value pair might be rendered.
 
 - **Type:** String (Go duration)
 - **Environment variable:** `LIMA_PROVIDER_DEFAULT_TIMEOUT`
-- **Default:** `20m`
+- **Default:** unset, meaning each operation uses its own default
 
-Fallback timeout for operations that do not set their own. Validated with Go
-duration parsing and must be greater than zero.
+Overrides the timeout of every operation that does not set its own. Validated
+with Go duration parsing and must be greater than zero.
 
-Resource-level `timeouts` blocks take precedence. See the `lima_instance`
-resource for its per-operation defaults.
+When it is **unset**, each operation uses the default appropriate to it:
+
+| Operation | Default |
+| --------- | ------- |
+| create    | `30m`   |
+| update    | `20m`   |
+| delete    | `20m`   |
+| read      | `2m`    |
+
+When it is **set**, that one value applies to all four. This is worth knowing
+before reaching for it: raising the timeout so a slow VM creation has room also
+gives every refresh the same budget, so a hung `limactl list` takes that long to
+be reported rather than a couple of minutes.
+
+Resource-level `timeouts` attributes take precedence over both.
 
 ### `name_prefix`
 

@@ -16,22 +16,24 @@ resource "lima_instance" "dev" {
 
   # Provisioning runs during instance creation, which is Lima's own model.
   # The provider never uses remote-exec and never re-runs scripts on refresh.
-  provision {
-    mode        = "system"
-    script      = file("${path.module}/bootstrap.sh")
-    rerun_token = filesha256("${path.module}/bootstrap.sh")
-  }
-
-  # A second step, run as the guest user.
-  provision {
-    mode   = "user"
-    script = <<-EOT
-      #!/bin/bash
-      set -euo pipefail
-      mkdir -p "$HOME/.config"
-      echo "provisioned by terraform" > "$HOME/.config/provisioned"
-    EOT
-  }
+  # Order is preserved, so these run in the order written.
+  provisions = [
+    {
+      mode        = "system"
+      script      = file("${path.module}/bootstrap.sh")
+      rerun_token = filesha256("${path.module}/bootstrap.sh")
+    },
+    # A second step, run as the guest user.
+    {
+      mode   = "user"
+      script = <<-EOT
+        #!/bin/bash
+        set -euo pipefail
+        mkdir -p "$HOME/.config"
+        echo "provisioned by terraform" > "$HOME/.config/provisioned"
+      EOT
+    },
+  ]
 }
 
 # Changing rerun_token (or any provisioning field) replaces the instance,

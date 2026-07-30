@@ -117,7 +117,7 @@ func (d *instanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, d.data.DefaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, d.data.timeout(lima.DefaultTimeouts.Read))
 	defer cancel()
 
 	name := config.Name.ValueString()

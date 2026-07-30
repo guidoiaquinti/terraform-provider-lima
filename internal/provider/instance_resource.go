@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -25,6 +24,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/guidoiaquinti/terraform-provider-lima/internal/lima"
+)
+
+// Attribute names, shared by the schema, the diagnostic paths that point into
+// these lists, and the tests that drive them.
+const (
+	attrMounts       = "mounts"
+	attrPortForwards = "port_forwards"
+	attrProvisions   = "provisions"
+
+	attrConfig          = "config"
+	attrConfigOverrides = "config_overrides"
 )
 
 var (
@@ -81,7 +91,7 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				PlanModifiers: replace,
 				Validators: []validator.String{
 					NonEmpty("template"),
-					stringvalidator.ConflictsWith(path.MatchRoot("config")),
+					stringvalidator.ConflictsWith(path.MatchRoot(attrConfig)),
 				},
 			},
 			"config": schema.StringAttribute{
@@ -94,14 +104,14 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				PlanModifiers: replace,
 				Validators:    []validator.String{YAML("config")},
 			},
-			"config_overrides": schema.StringAttribute{
+			attrConfigOverrides: schema.StringAttribute{
 				Optional: true,
 				MarkdownDescription: "YAML fragment merged last, as an escape hatch for Lima options without a typed attribute. " +
 					"Mappings merge key by key, sequences are replaced wholesale, and an explicit `null` removes a key. " +
 					"Changing this forces a new instance.",
 				Sensitive:     true,
 				PlanModifiers: replace,
-				Validators:    []validator.String{YAML("config_overrides")},
+				Validators:    []validator.String{YAML(attrConfigOverrides)},
 			},
 			"vm_type": schema.StringAttribute{
 				Optional: true,
@@ -160,6 +170,104 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 					"Changing this is applied **in place**, stopping and restarting a running instance. " +
 					"A disk is locked while the instance holding it runs, so detach it here before " +
 					"destroying or resizing the `lima_disk`.",
+			},
+			// The three lists below are nested *attributes* rather than blocks.
+			// A list attribute takes an ordinary expression, so deriving entries
+			// from data is a `for` comprehension rather than a `dynamic` block:
+			//
+			//	mounts = [for d in var.shared_dirs : { location = d, writable = true }]
+			//
+			// They are lists rather than sets because Lima treats their order as
+			// significant and reports them back in the order it was given.
+			attrMounts: schema.ListNestedAttribute{
+				Optional: true,
+				MarkdownDescription: "Host directories shared into the guest, in order. " +
+					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. " +
+					"Mounts the base template contributes are preserved.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"location": schema.StringAttribute{
+							Required: true,
+							MarkdownDescription: "Absolute host path to share. A leading `~` is expanded and the path is normalised, " +
+								"without resolving symlinks, so the value stays stable across plans.",
+							Validators: []validator.String{AbsolutePath()},
+						},
+						"mount_point": schema.StringAttribute{
+							Optional: true,
+							MarkdownDescription: "Guest path to mount at. Defaults to Lima's behaviour of reusing `location`. " +
+								"Lima rejects guest system paths such as `/etc` or `/usr`, and on macOS a `/tmp` mount needs an explicit value here.",
+							Validators: []validator.String{AbsolutePath()},
+						},
+						"writable": schema.BoolAttribute{
+							Optional:            true,
+							Computed:            true,
+							Default:             booldefault.StaticBool(false),
+							MarkdownDescription: "Whether the guest may write to the mount. Defaults to `false`.",
+						},
+					},
+				},
+			},
+			attrPortForwards: schema.ListNestedAttribute{
+				Optional: true,
+				MarkdownDescription: "Guest ports forwarded to the host, in order. " +
+					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"guest_port": schema.Int64Attribute{
+							Required:            true,
+							MarkdownDescription: "Port inside the guest, 1-65535.",
+							Validators:          []validator.Int64{int64validator.Between(1, 65535)},
+						},
+						"host_port": schema.Int64Attribute{
+							Optional:            true,
+							MarkdownDescription: "Port on the host, 1-65535. Defaults to Lima's own choice when omitted.",
+							Validators:          []validator.Int64{int64validator.Between(1, 65535)},
+						},
+						"protocol": schema.StringAttribute{
+							Optional:            true,
+							Computed:            true,
+							Default:             stringdefault.StaticString("tcp"),
+							MarkdownDescription: "Protocol, `tcp` or `udp`. Defaults to `tcp`.",
+							Validators:          []validator.String{OneOf("protocol", []string{"tcp", "udp"})},
+						},
+						"guest_ip": schema.StringAttribute{
+							Optional:            true,
+							MarkdownDescription: "Guest-side bind address. Leave unset unless you know the guest networking mode provides it.",
+						},
+						"host_ip": schema.StringAttribute{
+							Optional:            true,
+							MarkdownDescription: "Host-side bind address, for example `0.0.0.0` to expose the forward beyond loopback.",
+						},
+					},
+				},
+			},
+			attrProvisions: schema.ListNestedAttribute{
+				Optional: true,
+				MarkdownDescription: "Native Lima provisioning steps, in order. These run during instance creation, not on every apply. " +
+					"Changing any of them forces a new instance.",
+				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"mode": schema.StringAttribute{
+							Optional:            true,
+							Computed:            true,
+							Default:             stringdefault.StaticString("system"),
+							MarkdownDescription: "Lima provisioning mode. Defaults to `system`.",
+							Validators:          []validator.String{KnownValue("provisioning mode", lima.KnownProvisionModes)},
+						},
+						"script": schema.StringAttribute{
+							Required:            true,
+							Sensitive:           true,
+							MarkdownDescription: "Script body. Treated as sensitive and never echoed in diagnostics or logs.",
+							Validators:          []validator.String{NonEmpty("script")},
+						},
+						"rerun_token": schema.StringAttribute{
+							Optional: true,
+							MarkdownDescription: "Arbitrary value whose change forces a new instance, typically `filesha256(...)`. " +
+								"Because Lima runs provisioning at creation time, this is how you request a re-run.",
+						},
+					},
+				},
 			},
 			"timeouts": timeouts.AttributesAll(ctx),
 
@@ -235,95 +343,6 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
-		Blocks: map[string]schema.Block{
-			"mount": schema.ListNestedBlock{
-				MarkdownDescription: "Host directory shared into the guest. Order is preserved. " +
-					"Changing mounts is applied **in place** via `limactl edit`, which stops and restarts a running instance. " +
-					"Mounts the base template contributes are preserved.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"location": schema.StringAttribute{
-							Required: true,
-							MarkdownDescription: "Absolute host path to share. A leading `~` is expanded and the path is normalised, " +
-								"without resolving symlinks, so the value stays stable across plans.",
-							Validators: []validator.String{AbsolutePath()},
-						},
-						"mount_point": schema.StringAttribute{
-							Optional: true,
-							MarkdownDescription: "Guest path to mount at. Defaults to Lima's behaviour of reusing `location`. " +
-								"Lima rejects guest system paths such as `/etc` or `/usr`, and on macOS a `/tmp` mount needs an explicit value here.",
-							Validators: []validator.String{AbsolutePath()},
-						},
-						"writable": schema.BoolAttribute{
-							Optional:            true,
-							Computed:            true,
-							Default:             booldefault.StaticBool(false),
-							MarkdownDescription: "Whether the guest may write to the mount. Defaults to `false`.",
-						},
-					},
-				},
-			},
-			"port_forward": schema.ListNestedBlock{
-				MarkdownDescription: "Forward a guest port to the host. Order is preserved. " +
-					"Changing forwards is applied **in place** via `limactl edit`, which stops and restarts a running instance.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"guest_port": schema.Int64Attribute{
-							Required:            true,
-							MarkdownDescription: "Port inside the guest, 1-65535.",
-							Validators:          []validator.Int64{int64validator.Between(1, 65535)},
-						},
-						"host_port": schema.Int64Attribute{
-							Optional:            true,
-							MarkdownDescription: "Port on the host, 1-65535. Defaults to Lima's own choice when omitted.",
-							Validators:          []validator.Int64{int64validator.Between(1, 65535)},
-						},
-						"protocol": schema.StringAttribute{
-							Optional:            true,
-							Computed:            true,
-							Default:             stringdefault.StaticString("tcp"),
-							MarkdownDescription: "Protocol, `tcp` or `udp`. Defaults to `tcp`.",
-							Validators:          []validator.String{OneOf("protocol", []string{"tcp", "udp"})},
-						},
-						"guest_ip": schema.StringAttribute{
-							Optional:            true,
-							MarkdownDescription: "Guest-side bind address. Leave unset unless you know the guest networking mode provides it.",
-						},
-						"host_ip": schema.StringAttribute{
-							Optional:            true,
-							MarkdownDescription: "Host-side bind address, for example `0.0.0.0` to expose the forward beyond loopback.",
-						},
-					},
-				},
-			},
-			"provision": schema.ListNestedBlock{
-				MarkdownDescription: "Native Lima provisioning step. These run during instance creation, not on every apply. " +
-					"Changing any provisioning block forces a new instance.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"mode": schema.StringAttribute{
-							Optional:            true,
-							Computed:            true,
-							Default:             stringdefault.StaticString("system"),
-							MarkdownDescription: "Lima provisioning mode. Defaults to `system`.",
-							Validators:          []validator.String{KnownValue("provisioning mode", lima.KnownProvisionModes)},
-						},
-						"script": schema.StringAttribute{
-							Required:            true,
-							Sensitive:           true,
-							MarkdownDescription: "Script body. Treated as sensitive and never echoed in diagnostics or logs.",
-							Validators:          []validator.String{NonEmpty("script")},
-						},
-						"rerun_token": schema.StringAttribute{
-							Optional: true,
-							MarkdownDescription: "Arbitrary value whose change forces a new instance, typically `filesha256(...)`. " +
-								"Because Lima runs provisioning at creation time, this is how you request a re-run.",
-						},
-					},
-				},
-				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
-			},
-		},
 	}
 }
 
@@ -335,11 +354,17 @@ func (r *instanceResource) ValidateConfig(ctx context.Context, req resource.Vali
 		return
 	}
 
+	lists, diags := config.declared(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	prefix, home := "", ""
 	if r.data != nil {
 		prefix, home = r.data.NamePrefix, r.data.Home
 	}
-	resp.Diagnostics.Append(validateInstanceConfig(&config, prefix, home)...)
+	resp.Diagnostics.Append(validateInstanceConfig(&config, lists, prefix, home)...)
 }
 
 // validateInstanceConfig holds the plan-time cross-attribute checks.
@@ -347,19 +372,30 @@ func (r *instanceResource) ValidateConfig(ctx context.Context, req resource.Vali
 // It is a plain function over the model so it can be unit tested without
 // constructing Terraform framework plumbing. It never runs a command, so it
 // works with `terraform validate` and with no Lima installed.
-func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag.Diagnostics {
+//
+// A list that is still unknown is reported by lists.Unknown, and the checks that
+// turn on "nothing is set" are skipped rather than guessed at.
+func validateInstanceConfig(config *instanceModel, lists declaredLists, namePrefix, home string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	hasTemplate := !config.Template.IsNull() && !config.Template.IsUnknown()
-	hasConfig := !config.Config.IsNull() && !config.Config.IsUnknown()
+	templateKnown := !config.Template.IsUnknown()
+	configKnown := !config.Config.IsUnknown()
+	hasTemplate := !config.Template.IsNull() && templateKnown
+	hasConfig := !config.Config.IsNull() && configKnown
 
 	// Exactly one instance source is expected. Neither is an error only when
 	// no typed attribute is set either, because an instance with no image and
 	// no settings would fail confusingly inside Lima.
-	if !hasTemplate && !hasConfig {
+	//
+	// An unknown source, or an unresolved list that might carry a typed
+	// attribute, means the question cannot be answered yet. Saying nothing is
+	// the only honest option: warning here fired on every plan whose `config`
+	// came from a variable or another resource.
+	sourceKnown := templateKnown && configKnown && !lists.Unknown
+	if !hasTemplate && !hasConfig && sourceKnown {
 		hasTyped := !config.VMType.IsNull() || !config.Arch.IsNull() || !config.CPUs.IsNull() ||
 			!config.Memory.IsNull() || !config.Disk.IsNull() ||
-			len(config.Mounts) > 0 || len(config.PortForwards) > 0 || len(config.Provisions) > 0 ||
+			len(lists.Mounts) > 0 || len(lists.PortForwards) > 0 || len(lists.Provisions) > 0 ||
 			!config.ConfigOverrides.IsNull()
 		if !hasTyped {
 			diags.AddError(
@@ -376,11 +412,41 @@ func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag
 		)
 	}
 
+	// Plain mode makes Lima ignore mounts and port forwarding outright, and
+	// skip the guest agent that implements forwarding. Nothing fails: the
+	// settings simply have no effect, and the only symptom is a service that
+	// cannot be reached from the host.
+	if len(lists.Mounts) > 0 || len(lists.PortForwards) > 0 {
+		for _, doc := range []struct {
+			attribute string
+			value     types.String
+		}{
+			{attrConfig, config.Config},
+			{attrConfigOverrides, config.ConfigOverrides},
+		} {
+			if doc.value.IsNull() || doc.value.IsUnknown() {
+				continue
+			}
+			if plain, known := lima.PlainMode(doc.value.ValueString()); known && plain {
+				diags.AddAttributeWarning(
+					path.Root(doc.attribute),
+					"Plain mode ignores mounts and port forwarding",
+					fmt.Sprintf("%q sets \"plain: true\", so Lima ignores the mounts and port_forwards "+
+						"declared here and does not start the guest agent that implements forwarding. "+
+						"They will apply cleanly and have no effect.\n\n"+
+						"Remove \"plain: true\" to use them, or drop the entries. Everything plain disables "+
+						"can be disabled individually instead: mounts: [] and containerd off.", doc.attribute),
+				)
+				break
+			}
+		}
+	}
+
 	// Duplicate port forwards are almost certainly a mistake, and Lima's own
 	// error for the resulting conflict is much harder to act on.
 	seenGuest := map[string]int{}
 	seenHost := map[string]int{}
-	for i, pf := range config.PortForwards {
+	for i, pf := range lists.PortForwards {
 		if pf.GuestPort.IsNull() || pf.GuestPort.IsUnknown() {
 			continue
 		}
@@ -392,9 +458,9 @@ func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag
 		guestKey := fmt.Sprintf("%s/%d/%s", proto, pf.GuestPort.ValueInt64(), stringValue(pf.GuestIP))
 		if prev, dup := seenGuest[guestKey]; dup {
 			diags.AddAttributeError(
-				path.Root("port_forward").AtListIndex(i).AtName("guest_port"),
+				path.Root(attrPortForwards).AtListIndex(i).AtName("guest_port"),
 				"Duplicate port forward",
-				fmt.Sprintf("Guest port %d/%s is already forwarded by port_forward block %d.",
+				fmt.Sprintf("Guest port %d/%s is already forwarded by port_forwards[%d].",
 					pf.GuestPort.ValueInt64(), proto, prev),
 			)
 		} else {
@@ -407,9 +473,9 @@ func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag
 		hostKey := fmt.Sprintf("%s/%d/%s", proto, pf.HostPort.ValueInt64(), stringValue(pf.HostIP))
 		if prev, dup := seenHost[hostKey]; dup {
 			diags.AddAttributeError(
-				path.Root("port_forward").AtListIndex(i).AtName("host_port"),
+				path.Root(attrPortForwards).AtListIndex(i).AtName("host_port"),
 				"Duplicate host port",
-				fmt.Sprintf("Host port %d/%s is already used by port_forward block %d. "+
+				fmt.Sprintf("Host port %d/%s is already used by port_forwards[%d]. "+
 					"Two forwards cannot bind the same host port.",
 					pf.HostPort.ValueInt64(), proto, prev),
 			)
@@ -420,7 +486,7 @@ func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag
 
 	// Overlapping mount locations confuse Lima, so flag them before apply.
 	seenMount := map[string]int{}
-	for i, m := range config.Mounts {
+	for i, m := range lists.Mounts {
 		if m.Location.IsNull() || m.Location.IsUnknown() {
 			continue
 		}
@@ -430,9 +496,9 @@ func validateInstanceConfig(config *instanceModel, namePrefix, home string) diag
 		}
 		if prev, dup := seenMount[expanded]; dup {
 			diags.AddAttributeError(
-				path.Root("mount").AtListIndex(i).AtName("location"),
+				path.Root(attrMounts).AtListIndex(i).AtName("location"),
 				"Duplicate mount location",
-				fmt.Sprintf("%q is already mounted by mount block %d.", expanded, prev),
+				fmt.Sprintf("%q is already mounted by mounts[%d].", expanded, prev),
 			)
 		} else {
 			seenMount[expanded] = i
@@ -465,7 +531,7 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	timeout, diags := plan.Timeouts.Create(ctx, r.defaultTimeout(lima.DefaultTimeouts.Create))
+	timeout, diags := plan.Timeouts.Create(ctx, r.data.timeout(lima.DefaultTimeouts.Create))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -475,7 +541,13 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 
 	name := effectiveName(r.data.NamePrefix, plan.Name.ValueString())
 
-	document, hash, diags := r.render(ctx, &plan)
+	lists, diags := plan.declared(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	document, hash, diags := r.render(&plan, lists)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -533,7 +605,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	timeout, diags := state.Timeouts.Read(ctx, r.defaultTimeout(lima.DefaultTimeouts.Read))
+	timeout, diags := state.Timeouts.Read(ctx, r.data.timeout(lima.DefaultTimeouts.Read))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -558,14 +630,30 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
+	lists, diags := state.declared(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	state.applyInstance(inst)
 	state.applyObservedConfig(inst)
 
 	// Mounts and port forwards are reconcilable in place, so divergence is
 	// written into state and surfaces as an ordinary plan diff rather than a
-	// warning. See reconcileDeclaredBlocks.
-	reconcileDeclaredBlocks(&state, inst)
+	// warning. See reconcileDeclaredEntries.
+	resp.Diagnostics.Append(reconcileDeclaredEntries(ctx, &state, lists, inst)...)
 	resp.Diagnostics.Append(state.applyAttachedDisks(ctx, inst)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// The reconciled lists are what the hash below must describe.
+	lists, diags = state.declared(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// start reflects observed reality so an externally stopped instance
 	// shows as drift.
@@ -574,7 +662,7 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	// config_hash is derived from configuration, not from Lima, so it is
 	// recomputed rather than read back. Recomputing keeps it correct after a
 	// provider upgrade changes rendering.
-	if _, hash, d := r.render(ctx, &state); !d.HasError() {
+	if _, hash, d := r.render(&state, lists); !d.HasError() {
 		state.ConfigHash = types.StringValue(hash)
 	}
 
@@ -589,7 +677,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	timeout, diags := plan.Timeouts.Update(ctx, r.defaultTimeout(lima.DefaultTimeouts.Update))
+	timeout, diags := plan.Timeouts.Update(ctx, r.data.timeout(lima.DefaultTimeouts.Update))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -599,9 +687,20 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 
 	name := r.stateName(&state)
 
-	// Attributes reachable here: start, protect, cpus, memory and disk.
-	// Everything else carries RequiresReplace, so the framework routes it to
-	// a replacement instead.
+	// Both sides are needed: the plan says what the lists should become, and
+	// state says which resolved entries the provider previously owned, which is
+	// how Resize tells them apart from the base template's.
+	planLists, diags := plan.declared(ctx)
+	resp.Diagnostics.Append(diags...)
+	stateLists, d := state.declared(ctx)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Attributes reachable here: start, protect, cpus, memory, disk, mounts,
+	// port_forwards and additional_disks. Everything else carries
+	// RequiresReplace, so the framework routes it to a replacement instead.
 	wantProtect := boolValue(plan.Protect)
 	wantRunning := boolValue(plan.Start)
 
@@ -637,10 +736,10 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		Desired:              resize,
 		WantRunning:          wantRunning,
 		AdditionalDisks:      plannedDisks(&plan),
-		Mounts:               plannedMounts(&plan),
-		PreviousMounts:       configuredMounts(&state),
-		PortForwards:         plannedPortForwards(&plan),
-		PreviousPortForwards: configuredPortForwards(&state),
+		Mounts:               plannedMounts(planLists),
+		PreviousMounts:       configuredMounts(stateLists),
+		PortForwards:         plannedPortForwards(planLists),
+		PreviousPortForwards: configuredPortForwards(stateLists),
 	}); err != nil {
 		r.addResizeError(resp, name, resize, wantRunning, err)
 		return
@@ -664,7 +763,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	_, hash, diags := r.render(ctx, &plan)
+	_, hash, diags := r.render(&plan, planLists)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -682,7 +781,7 @@ func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	timeout, diags := state.Timeouts.Delete(ctx, r.defaultTimeout(lima.DefaultTimeouts.Delete))
+	timeout, diags := state.Timeouts.Delete(ctx, r.data.timeout(lima.DefaultTimeouts.Delete))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -805,25 +904,40 @@ func (r *instanceResource) ImportState(ctx context.Context, req resource.ImportS
 	// afterwards adopts the instance rather than replacing it, because those
 	// attributes use ReplaceOnRealChange.
 
-	resp.Diagnostics.AddWarning(
-		"Review the imported configuration",
-		fmt.Sprintf("Imported Lima instance %q as name = %q.\n\n"+
-			"Everything Lima reports has been recorded: cpus, memory, disk, vm_type, arch, "+
-			"start and protect. Write those values in your configuration and `terraform plan` "+
-			"will be clean.\n\n"+
-			"\"template\", \"config\" and \"config_overrides\" were left unset, because Lima does not "+
-			"record which template an instance came from. Declaring one adopts the instance "+
-			"without recreating it.\n\n"+
-			"Mount, port_forward and provision blocks were also left unset. Adding one plans a "+
-			"replacement, because the provider has no way to apply it to an existing instance.",
-			actual, logical))
+	resp.Diagnostics.AddWarning("Review the imported configuration", importWarningDetail(logical, actual))
+}
+
+// importWarningDetail explains what import recorded and what declaring the rest
+// will do.
+//
+// The claim about each list attribute has to match its plan modifiers. An
+// earlier revision said all three forced replacement, which stopped being true
+// once mounts and port forwards became in-place edits, and the warning then
+// discouraged users from a feature the provider had shipped.
+// TestImportWarningMatchesReplacementBehaviour derives the expectation from the
+// schema so the two cannot diverge again.
+func importWarningDetail(logical, actual string) string {
+	return fmt.Sprintf("Imported Lima instance %q as name = %q.\n\n"+
+		"Everything Lima reports has been recorded: cpus, memory, disk, vm_type, arch, "+
+		"start and protect. Write those values in your configuration and `terraform plan` "+
+		"will be clean.\n\n"+
+		"\"template\", \"config\" and \"config_overrides\" were left unset, because Lima does not "+
+		"record which template an instance came from. Declaring one adopts the instance "+
+		"without recreating it.\n\n"+
+		"%q and %q were left unset too, because Lima's resolved lists do not distinguish "+
+		"the entries a user asked for from the ones a template contributed. Declaring them is "+
+		"applied in place on the next apply, which stops the instance, reconfigures it and "+
+		"starts it again.\n\n"+
+		"%q was also left unset. Declaring it forces a new instance, because Lima runs "+
+		"provisioning only at creation time and offers no supported way to re-run it.",
+		actual, logical, attrMounts, attrPortForwards, attrProvisions)
 }
 
 // render generates the effective document and its hash.
-func (r *instanceResource) render(ctx context.Context, m *instanceModel) ([]byte, string, diag.Diagnostics) {
+func (r *instanceResource) render(m *instanceModel, lists declaredLists) ([]byte, string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	req, d := m.toRenderRequest(ctx)
+	req, d := m.toRenderRequest(lists)
 	diags.Append(d...)
 	if diags.HasError() {
 		return nil, "", diags
@@ -850,13 +964,6 @@ func (r *instanceResource) stateName(m *instanceModel) string {
 		return m.ID.ValueString()
 	}
 	return effectiveName(r.data.NamePrefix, m.Name.ValueString())
-}
-
-func (r *instanceResource) defaultTimeout(fallback time.Duration) time.Duration {
-	if r.data != nil && r.data.DefaultTimeout > 0 {
-		return r.data.DefaultTimeout
-	}
-	return fallback
 }
 
 // resourceAddress produces a plausible import address for the error message.

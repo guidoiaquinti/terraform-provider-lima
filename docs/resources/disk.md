@@ -56,8 +56,7 @@ output "guest_path" {
   records what you asked for and is never overwritten from Lima; see
   `actual_format` for what Lima reports.
 
-- `timeouts` (Block) `create`, `update`, `delete` and `read`, each defaulting
-  to the provider's `default_timeout`.
+- `timeouts` (Attribute) See [Timeouts](#timeouts).
 
 ### Read-only
 
@@ -68,6 +67,27 @@ output "guest_path" {
 - `mount_point` (String) Guest path the disk is mounted at when attached.
 - `in_use_by` (String) Name of the **running** instance currently holding this
   disk, or null.
+
+## Timeouts
+
+- `create` — default `30m`
+- `update` — default `20m`
+- `delete` — default `20m`
+- `read` — default `2m`
+
+Setting the provider's `default_timeout` replaces **all four**. Leave it unset to
+keep the per-operation defaults above.
+
+`timeouts` is an **attribute**, not a block, so it takes an equals sign:
+
+```hcl
+resource "lima_disk" "data" {
+  # ...
+  timeouts = {
+    create = "10m"
+  }
+}
+```
 
 ## Update versus replacement
 

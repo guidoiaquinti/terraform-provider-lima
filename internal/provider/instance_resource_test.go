@@ -58,7 +58,7 @@ func TestValidateInstanceConfigInstanceSource(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			diags := validateInstanceConfig(&tc.model, "", "")
+			diags := validateInstanceConfig(&tc.model, declaredLists{}, "", "")
 			if diags.ErrorsCount() != tc.wantErrs {
 				t.Errorf("errors = %d, want %d: %v", diags.ErrorsCount(), tc.wantErrs, diags)
 			}
@@ -124,11 +124,11 @@ func TestValidateInstanceConfigDuplicatePortForwards(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			model := instanceModel{
-				Name:         types.StringValue("dev"),
-				Template:     types.StringValue("template:ubuntu"),
-				PortForwards: tc.forwards,
+				Name:     types.StringValue("dev"),
+				Template: types.StringValue("template:ubuntu"),
 			}
-			diags := validateInstanceConfig(&model, "", "")
+			lists := declaredLists{PortForwards: tc.forwards, PortForwardsManaged: true}
+			diags := validateInstanceConfig(&model, lists, "", "")
 			if diags.ErrorsCount() != tc.wantErrs {
 				t.Errorf("errors = %d, want %d: %v", diags.ErrorsCount(), tc.wantErrs, diags)
 			}
@@ -176,9 +176,9 @@ func TestValidateInstanceConfigDuplicateMounts(t *testing.T) {
 			model := instanceModel{
 				Name:     types.StringValue("dev"),
 				Template: types.StringValue("template:ubuntu"),
-				Mounts:   tc.mounts,
 			}
-			diags := validateInstanceConfig(&model, "", "")
+			lists := declaredLists{Mounts: tc.mounts, MountsManaged: true}
+			diags := validateInstanceConfig(&model, lists, "", "")
 			if diags.ErrorsCount() != tc.wantErrs {
 				t.Errorf("errors = %d, want %d: %v", diags.ErrorsCount(), tc.wantErrs, diags)
 			}
@@ -238,7 +238,7 @@ func TestValidateInstanceConfigNameWithPrefixAndHome(t *testing.T) {
 				Name:     types.StringValue(tc.instance),
 				Template: types.StringValue("template:ubuntu"),
 			}
-			diags := validateInstanceConfig(&model, tc.prefix, tc.home)
+			diags := validateInstanceConfig(&model, declaredLists{}, tc.prefix, tc.home)
 			if diags.ErrorsCount() != tc.wantErrs {
 				t.Fatalf("errors = %d, want %d: %v", diags.ErrorsCount(), tc.wantErrs, diags)
 			}
@@ -265,18 +265,22 @@ func TestValidateInstanceConfigSkipsUnknownValues(t *testing.T) {
 	model := instanceModel{
 		Name:     types.StringUnknown(),
 		Template: types.StringUnknown(),
+	}
+	lists := declaredLists{
 		PortForwards: []portModel{{
 			GuestPort: types.Int64Unknown(),
 			HostPort:  types.Int64Unknown(),
 			Protocol:  types.StringValue("tcp"),
 		}},
+		PortForwardsManaged: true,
 		Mounts: []mountModel{{
 			Location:   types.StringUnknown(),
 			MountPoint: types.StringNull(),
 			Writable:   types.BoolValue(false),
 		}},
+		MountsManaged: true,
 	}
-	diags := validateInstanceConfig(&model, "acme-", "/tmp/lima")
+	diags := validateInstanceConfig(&model, lists, "acme-", "/tmp/lima")
 	if diags.ErrorsCount() != 0 {
 		t.Errorf("unknown values produced errors: %v", diags)
 	}
@@ -289,12 +293,15 @@ func TestToRenderRequestExpandsMountPaths(t *testing.T) {
 		Template: types.StringValue("template:ubuntu"),
 		CPUs:     types.Int64Value(4),
 		Memory:   types.StringValue("8GiB"),
+	}
+	lists := declaredLists{
 		Mounts: []mountModel{{
 			// A path needing normalisation must reach Lima cleaned.
 			Location:   types.StringValue("/tmp/x/../project/"),
 			MountPoint: types.StringValue("/workspace"),
 			Writable:   types.BoolValue(true),
 		}},
+		MountsManaged: true,
 		PortForwards: []portModel{{
 			GuestPort: types.Int64Value(80),
 			HostPort:  types.Int64Value(8080),
@@ -302,6 +309,7 @@ func TestToRenderRequestExpandsMountPaths(t *testing.T) {
 			GuestIP:   types.StringNull(),
 			HostIP:    types.StringNull(),
 		}},
+		PortForwardsManaged: true,
 		Provisions: []provModel{{
 			Mode:       types.StringValue("system"),
 			Script:     types.StringValue("#!/bin/sh\necho hi\n"),
@@ -309,7 +317,7 @@ func TestToRenderRequestExpandsMountPaths(t *testing.T) {
 		}},
 	}
 
-	req, diags := model.toRenderRequest(t.Context())
+	req, diags := model.toRenderRequest(lists)
 	if diags.HasError() {
 		t.Fatalf("toRenderRequest: %v", diags)
 	}
@@ -339,15 +347,15 @@ func TestToRenderRequestExpandsMountPaths(t *testing.T) {
 func TestRerunTokenDoesNotReachTheDocument(t *testing.T) {
 	t.Parallel()
 
-	model := instanceModel{
-		Template: types.StringValue("template:ubuntu"),
+	model := instanceModel{Template: types.StringValue("template:ubuntu")}
+	lists := declaredLists{
 		Provisions: []provModel{{
 			Mode:       types.StringValue("system"),
 			Script:     types.StringValue("#!/bin/sh\ntrue\n"),
 			RerunToken: types.StringValue("sentinel-token-value"),
 		}},
 	}
-	req, diags := model.toRenderRequest(t.Context())
+	req, diags := model.toRenderRequest(lists)
 	if diags.HasError() {
 		t.Fatalf("toRenderRequest: %v", diags)
 	}
@@ -695,7 +703,7 @@ func mountsFixture(mounts ...lima.MountView) lima.Instance {
 	return inst
 }
 
-func TestReconcileDeclaredBlocksMounts(t *testing.T) {
+func TestReconcileDeclaredEntriesMounts(t *testing.T) {
 	t.Parallel()
 
 	declared := func(location, mountPoint string, writable bool) mountModel {
@@ -773,24 +781,30 @@ func TestReconcileDeclaredBlocksMounts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			model := instanceModel{Mounts: tc.declared}
-			reconcileDeclaredBlocks(&model, mountsFixture(tc.resolved...))
+			model := instanceModel{Mounts: mountsList(t, tc.declared)}
+			if diags := reconcileDeclaredEntries(t.Context(), &model, declaredOf(t, &model),
+				mountsFixture(tc.resolved...)); diags.HasError() {
+				t.Fatalf("reconcileDeclaredEntries: %v", diags)
+			}
 
-			if len(model.Mounts) != len(tc.want) {
-				t.Fatalf("mounts = %+v, want %+v", model.Mounts, tc.want)
+			// Read back through the same decode the resource uses, so the round
+			// trip into the attribute value is part of what is under test.
+			got := declaredOf(t, &model).Mounts
+			if len(got) != len(tc.want) {
+				t.Fatalf("mounts = %+v, want %+v", got, tc.want)
 			}
 			for i := range tc.want {
-				if !model.Mounts[i].Location.Equal(tc.want[i].Location) ||
-					!model.Mounts[i].MountPoint.Equal(tc.want[i].MountPoint) ||
-					!model.Mounts[i].Writable.Equal(tc.want[i].Writable) {
-					t.Errorf("mount %d = %+v, want %+v", i, model.Mounts[i], tc.want[i])
+				if !got[i].Location.Equal(tc.want[i].Location) ||
+					!got[i].MountPoint.Equal(tc.want[i].MountPoint) ||
+					!got[i].Writable.Equal(tc.want[i].Writable) {
+					t.Errorf("mount %d = %+v, want %+v", i, got[i], tc.want[i])
 				}
 			}
 		})
 	}
 }
 
-func TestReconcileDeclaredBlocksPortForwards(t *testing.T) {
+func TestReconcileDeclaredEntriesPortForwards(t *testing.T) {
 	t.Parallel()
 
 	inst := runningInstance()
@@ -800,44 +814,52 @@ func TestReconcileDeclaredBlocksPortForwards(t *testing.T) {
 
 	t.Run("matching forward is left alone", func(t *testing.T) {
 		t.Parallel()
-		model := instanceModel{PortForwards: []portModel{{
+		model := instanceModel{PortForwards: portForwardsList(t, []portModel{{
 			GuestPort: types.Int64Value(8080),
 			HostPort:  types.Int64Value(18080),
 			Protocol:  types.StringValue("tcp"),
-		}}}
-		reconcileDeclaredBlocks(&model, inst)
-		if len(model.PortForwards) != 1 || model.PortForwards[0].HostPort.ValueInt64() != 18080 {
-			t.Errorf("forwards = %+v, want unchanged", model.PortForwards)
+		}})}
+		if diags := reconcileDeclaredEntries(t.Context(), &model, declaredOf(t, &model), inst); diags.HasError() {
+			t.Fatalf("reconcileDeclaredEntries: %v", diags)
+		}
+		got := declaredOf(t, &model).PortForwards
+		if len(got) != 1 || got[0].HostPort.ValueInt64() != 18080 {
+			t.Errorf("forwards = %+v, want unchanged", got)
 		}
 	})
 
 	t.Run("unset host port stays null", func(t *testing.T) {
 		t.Parallel()
-		model := instanceModel{PortForwards: []portModel{{
+		model := instanceModel{PortForwards: portForwardsList(t, []portModel{{
 			GuestPort: types.Int64Value(8080),
 			HostPort:  types.Int64Null(),
 			Protocol:  types.StringValue("tcp"),
-		}}}
-		reconcileDeclaredBlocks(&model, inst)
-		if !model.PortForwards[0].HostPort.IsNull() {
-			t.Errorf("host_port = %v, want it to stay null (Lima picked it)", model.PortForwards[0].HostPort)
+		}})}
+		if diags := reconcileDeclaredEntries(t.Context(), &model, declaredOf(t, &model), inst); diags.HasError() {
+			t.Fatalf("reconcileDeclaredEntries: %v", diags)
+		}
+		got := declaredOf(t, &model).PortForwards
+		if !got[0].HostPort.IsNull() {
+			t.Errorf("host_port = %v, want it to stay null (Lima picked it)", got[0].HostPort)
 		}
 	})
 
 	t.Run("vanished forward is removed from state", func(t *testing.T) {
 		t.Parallel()
-		model := instanceModel{PortForwards: []portModel{{
+		model := instanceModel{PortForwards: portForwardsList(t, []portModel{{
 			GuestPort: types.Int64Value(9999),
 			Protocol:  types.StringValue("tcp"),
-		}}}
-		reconcileDeclaredBlocks(&model, inst)
-		if len(model.PortForwards) != 0 {
-			t.Errorf("forwards = %+v, want the missing one dropped", model.PortForwards)
+		}})}
+		if diags := reconcileDeclaredEntries(t.Context(), &model, declaredOf(t, &model), inst); diags.HasError() {
+			t.Fatalf("reconcileDeclaredEntries: %v", diags)
+		}
+		if got := declaredOf(t, &model).PortForwards; len(got) != 0 {
+			t.Errorf("forwards = %+v, want the missing one dropped", got)
 		}
 	})
 }
 
-func TestReconcileDeclaredBlocksSkipsUnresolvedInstances(t *testing.T) {
+func TestReconcileDeclaredEntriesSkipsUnresolvedInstances(t *testing.T) {
 	t.Parallel()
 
 	// A broken or half-created instance has no configuration worth comparing,
@@ -846,15 +868,17 @@ func TestReconcileDeclaredBlocksSkipsUnresolvedInstances(t *testing.T) {
 		inst := mountsFixture()
 		inst.RawStatus = status
 
-		model := instanceModel{Mounts: []mountModel{{
+		model := instanceModel{Mounts: mountsList(t, []mountModel{{
 			Location:   types.StringValue("/private/tmp"),
 			MountPoint: types.StringNull(),
 			Writable:   types.BoolValue(true),
-		}}}
-		reconcileDeclaredBlocks(&model, inst)
+		}})}
+		if diags := reconcileDeclaredEntries(t.Context(), &model, declaredOf(t, &model), inst); diags.HasError() {
+			t.Fatalf("reconcileDeclaredEntries: %v", diags)
+		}
 
-		if len(model.Mounts) != 1 {
-			t.Errorf("status %q: mounts were rewritten to %+v", status, model.Mounts)
+		if got := declaredOf(t, &model).Mounts; len(got) != 1 {
+			t.Errorf("status %q: mounts were rewritten to %+v", status, got)
 		}
 	}
 }

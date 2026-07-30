@@ -14,19 +14,20 @@ resource "lima_instance" "dev" {
   name     = "project-dev"
   template = "template:ubuntu"
 
-  # abspath keeps the configuration portable across checkout locations.
-  mount {
-    location    = abspath(path.module)
-    mount_point = "/workspace"
-    writable    = true
-  }
-
-  # A read-only cache directory. A leading ~ is expanded by the provider.
-  mount {
-    location    = "~/.cache/shared"
-    mount_point = "/mnt/cache"
-    writable    = false
-  }
+  mounts = [
+    # abspath keeps the configuration portable across checkout locations.
+    {
+      location    = abspath(path.module)
+      mount_point = "/workspace"
+      writable    = true
+    },
+    # A read-only cache directory. A leading ~ is expanded by the provider.
+    {
+      location    = "~/.cache/shared"
+      mount_point = "/mnt/cache"
+      writable    = false
+    },
+  ]
 }
 
 # Notes:
@@ -38,4 +39,11 @@ resource "lima_instance" "dev" {
 #   macOS, mounting /tmp without an explicit mount_point fails for this reason,
 #   because /tmp resolves to /private/tmp.
 #
-# * Changing any mount replaces the instance. See the resource documentation.
+# * Changing a mount is applied in place: the instance is stopped, reconfigured
+#   with `limactl edit --set` and started again. Expect brief downtime, not a
+#   rebuild. See the resource documentation.
+#
+# * Because `mounts` is a list attribute rather than a block, entries can be
+#   derived from data:
+#
+#       mounts = [for d in var.shared_dirs : { location = d, writable = true }]

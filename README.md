@@ -55,7 +55,7 @@ The exact command contract, captured by running the real CLI, is documented in
 - `lima_disk` resource: additional disks, with in-place growth
 - `lima_instance`, `lima_disk` and `lima_host` data sources
 - Typed attributes for CPU, memory, disk, VM type and architecture
-- Nested blocks for mounts, port forwards and native provisioning
+- Nested list attributes for mounts, port forwards and native provisioning
 - Raw Lima YAML and a `config_overrides` escape hatch, merged deterministically
 - Deterministic YAML generation with a stable `config_hash`
 - In-place CPU, memory and disk resizing via `limactl edit`
@@ -114,42 +114,92 @@ More examples, all of which are valid configurations, live in
 
 ## Local development installation
 
-The provider is not published to a registry. Use a development override, which
-avoids reinstalling after every build.
+The provider is not published to a registry, so it has to be supplied locally.
+There are two ways, and which one you want depends on whether your
+configuration has **state**.
 
-1. Build it:
+### A development override — no state, or no modules
 
-   ```console
-   $ make build
-   ```
+```console
+$ make build
+```
 
-2. Create `~/.terraformrc` (or `~/.tofurc` for OpenTofu):
+Then in `~/.terraformrc` (or `~/.tofurc` for OpenTofu):
 
-   ```hcl
-   provider_installation {
-     dev_overrides {
-       "guidoiaquinti/lima" = "/absolute/path/to/terraform-provider-lima"
-     }
+```hcl
+provider_installation {
+  dev_overrides {
+    "guidoiaquinti/lima" = "/absolute/path/to/terraform-provider-lima"
+  }
 
-     direct {}
-   }
-   ```
+  direct {}
+}
+```
 
-   The path is the **directory** containing the built binary, not the binary
-   itself.
+The path is the **directory** containing the built binary, not the binary
+itself. Terraform prints a warning on every command that overrides are in
+effect; that is expected.
 
-3. Run Terraform. Skip `terraform init`; with a dev override it is neither
-   needed nor allowed to install the provider:
+An override installs nothing, so `terraform init` is not needed to obtain the
+provider — but it **is** still needed for anything else init does, most
+commonly installing modules. A configuration calling `module "..."` fails with
+*"Module not installed"* until init has run.
 
-   ```console
-   $ terraform plan
-   ```
+**And this is where the override runs out.** `terraform init` performs version
+selection for every provider the *state* requires, and an overridden provider
+does not take part in it. Once state contains a single `lima_instance`, init
+goes looking for `guidoiaquinti/lima` in the registry, does not find it, and
+fails:
 
-   Terraform prints a warning that development overrides are in effect. That
-   is expected.
+```text
+Error: Failed to query available provider packages
 
-Alternatively `make install` copies the binary into
-`~/.terraform.d/plugins/...` for use with a normal `terraform init`.
+Could not retrieve the list of available versions for provider
+guidoiaquinti/lima: provider registry registry.terraform.io does not have a
+provider named registry.terraform.io/guidoiaquinti/lima
+```
+
+The first init succeeds and every later one fails. If your configuration has
+modules *and* state — so init is unavoidable — use a mirror instead.
+
+### A filesystem mirror — works with state
+
+A mirror is a real installable package, so version selection succeeds and no
+warning is printed:
+
+```console
+$ make build
+$ V=0.1.0
+$ DIR="$PWD/mirror/registry.terraform.io/guidoiaquinti/lima/$V/$(go env GOOS)_$(go env GOARCH)"
+$ mkdir -p "$DIR"
+$ cp terraform-provider-lima "$DIR/terraform-provider-lima_v$V"
+```
+
+```hcl
+provider_installation {
+  filesystem_mirror {
+    path    = "/absolute/path/to/mirror"
+    include = ["guidoiaquinti/lima"]
+  }
+
+  direct {
+    exclude = ["guidoiaquinti/lima"]
+  }
+}
+```
+
+Two things to know:
+
+- The version in the mirror path must **not** be a prerelease. Terraform will
+  not select one for an unconstrained requirement, so `0.1.0-dev` is silently
+  skipped and you are back to the registry error. Use `0.1.0`; it labels the
+  local build and claims nothing about a release.
+- `terraform init` writes a checksum of the binary into `.terraform.lock.hcl`,
+  so **delete the lock file whenever you rebuild** or the next init rejects the
+  new binary.
+
+`make install` is the same idea into `~/.terraform.d/plugins/...`, at the cost
+of making the version in use ambient rather than per-project.
 
 ## Supported Lima versions
 
@@ -211,7 +261,7 @@ and the gap is named.
 
 | Resource / data source     | Kind        | Support    | Coverage                                                                                                                                                              |
 | -------------------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lima_instance`            | Resource    | 🟡 Partial | Create, read, update, delete and import. Typed attributes for the common fields; `config` and `config_overrides` reach anything Lima accepts but the schema does not name. Gap: `provision` can be neither re-run nor drift-detected, because Lima runs scripts at creation only and does not record what ran. |
+| `lima_instance`            | Resource    | 🟡 Partial | Create, read, update, delete and import. Typed attributes for the common fields; `config` and `config_overrides` reach anything Lima accepts but the schema does not name. Gap: `provisions` can be neither re-run nor drift-detected, because Lima runs scripts at creation only and does not record what ran. |
 | `lima_disk`                | Resource    | 🟡 Partial | Create, read, grow, delete and import, matching `limactl disk`. Gap: `limactl disk unlock` is not exposed, by choice — the provider cannot distinguish a stale lock from a live one. |
 | `lima_instance`            | Data source | 🟡 Partial | Identity, sizing, status, protection and the SSH endpoint from `limactl list --all-fields`. Gap: guest IP addresses and the resolved mount and network lists are not surfaced — see [Limitations](#limitations). |
 | `lima_disk`                | Data source | ✅ Full     | Everything `limactl disk list` reports: size, format, backing directory, mount point and the instance currently holding it.                                             |
@@ -249,9 +299,9 @@ The table below reflects the plan modifiers in the code, not intentions. See
 | `disk`             | **In place** growth; shrinking is rejected at plan time |
 | `start`            | In place (start / stop)                                 |
 | `protect`          | In place (`limactl protect` / `unprotect`)              |
-| `mount`            | **In place** (stop, `limactl edit --set`, restart)      |
-| `port_forward`     | **In place** (stop, `limactl edit --set`, restart)      |
-| `provision`        | Replace                                                 |
+| `mounts`           | **In place** (stop, `limactl edit --set`, restart)      |
+| `port_forwards`    | **In place** (stop, `limactl edit --set`, restart)      |
+| `provisions`       | Replace                                                 |
 | `additional_disks` | **In place** (stop, `limactl edit --set`, restart)      |
 
 For `lima_disk`:
@@ -299,7 +349,7 @@ the provider compares the instance's resolved disk images against the declared
 template's. That refutes a wrong claim but cannot confirm a right one, since
 `docker` and `ubuntu` share an image.
 
-Adding a `provision` block after import still forces replacement, since Lima
+Adding `provisions` after import still forces replacement, since Lima
 offers no way to run provisioning on an existing instance.
 
 ## Limitations
@@ -406,3 +456,7 @@ suspected vulnerability.
 ## Roadmap
 
 See [`ROADMAP.md`](ROADMAP.md).
+
+
+- https://github.com/lima-vm/lima/discussions/2111
+- https://github.com/dmacvicar/terraform-provider-libvirt#supported-resources--xml-coverage

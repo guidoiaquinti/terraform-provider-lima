@@ -141,7 +141,7 @@ func (r *diskResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	timeout, diags := plan.Timeouts.Create(ctx, r.data.DefaultTimeout)
+	timeout, diags := plan.Timeouts.Create(ctx, r.data.timeout(lima.DefaultTimeouts.Create))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -189,7 +189,7 @@ func (r *diskResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	timeout, diags := state.Timeouts.Read(ctx, lima.DefaultTimeouts.Read)
+	timeout, diags := state.Timeouts.Read(ctx, r.data.timeout(lima.DefaultTimeouts.Read))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -224,7 +224,7 @@ func (r *diskResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	timeout, diags := plan.Timeouts.Update(ctx, r.data.DefaultTimeout)
+	timeout, diags := plan.Timeouts.Update(ctx, r.data.timeout(lima.DefaultTimeouts.Update))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -266,7 +266,7 @@ func (r *diskResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	timeout, diags := state.Timeouts.Delete(ctx, r.data.DefaultTimeout)
+	timeout, diags := state.Timeouts.Delete(ctx, r.data.timeout(lima.DefaultTimeouts.Delete))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

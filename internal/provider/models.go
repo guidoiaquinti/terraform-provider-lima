@@ -24,6 +24,13 @@ import (
 // Read only ever writes the third group (plus config_hash, which is derived
 // from configuration rather than from Lima). It never overwrites the first,
 // which is what keeps refresh from producing perpetual diffs.
+//
+// The three list attributes are held as types.List rather than as Go slices,
+// because a list can be wholly unknown — `mounts = var.mounts` where the
+// variable resolves at apply time — and a []mountModel cannot represent that.
+// Decoding into a slice unconditionally fails with a Value Conversion Error
+// before planning begins. They are decoded through declared() instead, which is
+// the single place that has to reason about unknown.
 type instanceModel struct {
 	// Desired configuration.
 	Name            types.String `tfsdk:"name"`
@@ -38,9 +45,9 @@ type instanceModel struct {
 	Start           types.Bool   `tfsdk:"start"`
 	Protect         types.Bool   `tfsdk:"protect"`
 	AdditionalDisks types.List   `tfsdk:"additional_disks"`
-	Mounts          []mountModel `tfsdk:"mount"`
-	PortForwards    []portModel  `tfsdk:"port_forward"`
-	Provisions      []provModel  `tfsdk:"provision"`
+	Mounts          types.List   `tfsdk:"mounts"`
+	PortForwards    types.List   `tfsdk:"port_forwards"`
+	Provisions      types.List   `tfsdk:"provisions"`
 
 	// Effective configuration.
 	ConfigHash types.String `tfsdk:"config_hash"`
@@ -59,6 +66,68 @@ type instanceModel struct {
 	LimaVersion  types.String `tfsdk:"lima_version"`
 
 	Timeouts timeouts.Value `tfsdk:"timeouts"`
+}
+
+// declaredLists is the decoded form of the three list attributes.
+//
+// It exists so that every caller reasons about the lists the same way, and so
+// that the awkward parts — unknown values, and the difference between an absent
+// attribute and an empty one — are handled exactly once.
+type declaredLists struct {
+	Mounts       []mountModel
+	PortForwards []portModel
+	Provisions   []provModel
+
+	// MountsManaged and PortForwardsManaged separate "the attribute is absent"
+	// from "the attribute is an empty list". Absent means the provider does not
+	// manage these entries and must leave Lima's own alone; empty means the user
+	// deleted every entry and wants them gone. Collapsing the two would silently
+	// stop honouring a removal.
+	//
+	// A nil slice cannot carry this, because ElementsAs on a known empty list
+	// yields an empty non-nil slice.
+	MountsManaged       bool
+	PortForwardsManaged bool
+
+	// Unknown reports that at least one list is not yet resolved, so its
+	// emptiness proves nothing about the final configuration. Checks that turn
+	// on "nothing is set" must stay silent rather than guess.
+	Unknown bool
+}
+
+// declared decodes the three list attributes.
+//
+// A list that is null or unknown decodes to nil, so per-entry checks such as
+// duplicate detection simply have nothing to inspect. That is the honest
+// outcome: their contents do not exist yet.
+func (m *instanceModel) declared(ctx context.Context) (declaredLists, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var out declaredLists
+
+	diags.Append(elementsIfKnown(ctx, m.Mounts, &out.Mounts)...)
+	diags.Append(elementsIfKnown(ctx, m.PortForwards, &out.PortForwards)...)
+	diags.Append(elementsIfKnown(ctx, m.Provisions, &out.Provisions)...)
+
+	out.MountsManaged = isManaged(m.Mounts)
+	out.PortForwardsManaged = isManaged(m.PortForwards)
+	out.Unknown = m.Mounts.IsUnknown() || m.PortForwards.IsUnknown() || m.Provisions.IsUnknown()
+
+	return out, diags
+}
+
+// isManaged reports whether a list attribute is present and resolved, and so
+// describes entries the provider is responsible for.
+func isManaged(list types.List) bool {
+	return !list.IsNull() && !list.IsUnknown()
+}
+
+// elementsIfKnown decodes a list into target, leaving it nil when the list is
+// null or not yet known.
+func elementsIfKnown[T any](ctx context.Context, list types.List, target *[]T) diag.Diagnostics {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	return list.ElementsAs(ctx, target, false)
 }
 
 type mountModel struct {
@@ -106,8 +175,9 @@ func logicalName(prefix, actual string) string {
 	return actual
 }
 
-// toRenderRequest builds the configuration render request from the model.
-func (m *instanceModel) toRenderRequest(ctx context.Context) (lima.RenderRequest, diag.Diagnostics) {
+// toRenderRequest builds the configuration render request from the model and
+// its decoded list attributes.
+func (m *instanceModel) toRenderRequest(lists declaredLists) (lima.RenderRequest, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	typed := lima.InstanceConfig{
@@ -120,7 +190,7 @@ func (m *instanceModel) toRenderRequest(ctx context.Context) (lima.RenderRequest
 		typed.CPUs = m.CPUs.ValueInt64()
 	}
 
-	for i, mount := range m.Mounts {
+	for i, mount := range lists.Mounts {
 		location, err := lima.ExpandPath(mount.Location.ValueString())
 		if err != nil {
 			diags.AddError("Invalid mount location",
@@ -134,7 +204,7 @@ func (m *instanceModel) toRenderRequest(ctx context.Context) (lima.RenderRequest
 		})
 	}
 
-	for _, pf := range m.PortForwards {
+	for _, pf := range lists.PortForwards {
 		entry := lima.PortForward{
 			GuestPort: pf.GuestPort.ValueInt64(),
 			Proto:     stringValue(pf.Protocol),
@@ -147,7 +217,7 @@ func (m *instanceModel) toRenderRequest(ctx context.Context) (lima.RenderRequest
 		typed.PortForwards = append(typed.PortForwards, entry)
 	}
 
-	for _, p := range m.Provisions {
+	for _, p := range lists.Provisions {
 		typed.Provision = append(typed.Provision, lima.Provision{
 			Mode:   stringValue(p.Mode),
 			Script: p.Script.ValueString(),
@@ -160,7 +230,6 @@ func (m *instanceModel) toRenderRequest(ctx context.Context) (lima.RenderRequest
 		typed.AdditionalDisks = *disks
 	}
 
-	_ = ctx
 	return lima.RenderRequest{
 		Template:  stringValue(m.Template),
 		RawConfig: stringValue(m.Config),
@@ -348,12 +417,12 @@ func stringList(ctx context.Context, values []string) (types.List, diag.Diagnost
 	return types.ListValueFrom(ctx, types.StringType, values)
 }
 
-// reconcileDeclaredBlocks updates the mount and port_forward blocks in state
-// to reflect what Lima actually has.
+// reconcileDeclaredEntries updates the mounts and port_forwards attributes in
+// state to reflect what Lima actually has.
 //
 // Only **declared** entries are touched. Lima's resolved lists also contain
 // entries the base template contributed, and writing those into state would
-// make every plan propose removing blocks the user never wrote.
+// make every plan propose removing entries the user never wrote.
 //
 // This is what turns an out-of-band change into an ordinary Terraform diff:
 // state stops matching configuration, a plan proposes an update, and Resize
@@ -362,16 +431,18 @@ func stringList(ctx context.Context, values []string) (types.List, diag.Diagnost
 //
 // A declared entry whose location has disappeared is removed from state, so
 // the plan shows it being added back.
-func reconcileDeclaredBlocks(m *instanceModel, inst lima.Instance) {
+func reconcileDeclaredEntries(ctx context.Context, m *instanceModel, lists declaredLists, inst lima.Instance) diag.Diagnostics {
+	var diags diag.Diagnostics
+
 	switch inst.Status() {
 	case lima.StatusCreating, lima.StatusUnknown, lima.StatusBroken:
 		// Lima has not resolved a configuration worth comparing against.
-		return
+		return diags
 	}
 
-	if m.Mounts != nil {
-		kept := make([]mountModel, 0, len(m.Mounts))
-		for _, declared := range m.Mounts {
+	if lists.MountsManaged {
+		kept := make([]mountModel, 0, len(lists.Mounts))
+		for _, declared := range lists.Mounts {
 			observed, ok := observedMount(inst, declared)
 			if !ok {
 				// Gone entirely: drop it so the plan re-adds it.
@@ -379,20 +450,35 @@ func reconcileDeclaredBlocks(m *instanceModel, inst lima.Instance) {
 			}
 			kept = append(kept, observed)
 		}
-		m.Mounts = kept
+		diags.Append(setEntries(ctx, &m.Mounts, kept)...)
 	}
 
-	if m.PortForwards != nil {
-		kept := make([]portModel, 0, len(m.PortForwards))
-		for _, declared := range m.PortForwards {
+	if lists.PortForwardsManaged {
+		kept := make([]portModel, 0, len(lists.PortForwards))
+		for _, declared := range lists.PortForwards {
 			observed, ok := observedPortForward(inst, declared)
 			if !ok {
 				continue
 			}
 			kept = append(kept, observed)
 		}
-		m.PortForwards = kept
+		diags.Append(setEntries(ctx, &m.PortForwards, kept)...)
 	}
+
+	return diags
+}
+
+// setEntries writes entries back into a list attribute.
+//
+// The element type is taken from the value being replaced rather than
+// hand-written, so adding a nested attribute cannot leave a stale type behind
+// here. Only a managed list is ever written, so its type is always available.
+func setEntries[T any](ctx context.Context, list *types.List, entries []T) diag.Diagnostics {
+	updated, diags := types.ListValueFrom(ctx, list.ElementType(ctx), entries)
+	if !diags.HasError() {
+		*list = updated
+	}
+	return diags
 }
 
 // observedMount returns the declared mount updated with Lima's view of it.
@@ -451,9 +537,9 @@ func observedPortForward(inst lima.Instance, declared portModel) (portModel, boo
 //
 // Host paths are expanded the same way the create path expands them, so a
 // mount recorded in state matches what Lima was told.
-func configuredMounts(m *instanceModel) []lima.Mount {
-	out := make([]lima.Mount, 0, len(m.Mounts))
-	for _, mount := range m.Mounts {
+func configuredMounts(lists declaredLists) []lima.Mount {
+	out := make([]lima.Mount, 0, len(lists.Mounts))
+	for _, mount := range lists.Mounts {
 		if mount.Location.IsNull() || mount.Location.IsUnknown() {
 			continue
 		}
@@ -472,21 +558,21 @@ func configuredMounts(m *instanceModel) []lima.Mount {
 
 // plannedMounts returns the configured mounts as a settable list.
 //
-// A nil result means the attribute is unmanaged and Lima's own mounts must be
-// left alone. An empty (but non-nil) list means the user removed every mount
-// block, which is a real request to unmount them.
-func plannedMounts(m *instanceModel) *[]lima.Mount {
-	if m.Mounts == nil {
+// A nil result means the attribute is absent and Lima's own mounts must be left
+// alone. An empty (but non-nil) list means the user removed every entry, which
+// is a real request to unmount them.
+func plannedMounts(lists declaredLists) *[]lima.Mount {
+	if !lists.MountsManaged {
 		return nil
 	}
-	mounts := configuredMounts(m)
+	mounts := configuredMounts(lists)
 	return &mounts
 }
 
 // configuredPortForwards converts the model's port_forward blocks.
-func configuredPortForwards(m *instanceModel) []lima.PortForward {
-	out := make([]lima.PortForward, 0, len(m.PortForwards))
-	for _, pf := range m.PortForwards {
+func configuredPortForwards(lists declaredLists) []lima.PortForward {
+	out := make([]lima.PortForward, 0, len(lists.PortForwards))
+	for _, pf := range lists.PortForwards {
 		if pf.GuestPort.IsNull() || pf.GuestPort.IsUnknown() {
 			continue
 		}
@@ -505,11 +591,11 @@ func configuredPortForwards(m *instanceModel) []lima.PortForward {
 }
 
 // plannedPortForwards returns the configured forwards as a settable list.
-func plannedPortForwards(m *instanceModel) *[]lima.PortForward {
-	if m.PortForwards == nil {
+func plannedPortForwards(lists declaredLists) *[]lima.PortForward {
+	if !lists.PortForwardsManaged {
 		return nil
 	}
-	forwards := configuredPortForwards(m)
+	forwards := configuredPortForwards(lists)
 	return &forwards
 }
 

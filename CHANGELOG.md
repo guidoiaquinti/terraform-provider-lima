@@ -8,3 +8,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 Nothing released yet. The first entry will be added when `0.1.0` is tagged.
+
+### Changed
+
+- **Breaking.** The `mount`, `port_forward` and `provision` blocks of
+  `lima_instance` are now the list attributes `mounts`, `port_forwards` and
+  `provisions`. Migration is mechanical — an equals sign, brackets, and a comma
+  between entries:
+
+  ```hcl
+  # Before
+  mount {
+    location = abspath(path.module)
+    writable = true
+  }
+
+  # After
+  mounts = [
+    { location = abspath(path.module), writable = true },
+  ]
+  ```
+
+  The reason is ergonomic. A block cannot be produced by an expression, so
+  deriving entries from data meant `dynamic "mount"`, and Terraform expands
+  dynamic blocks *after* `ValidateResourceConfig`, which is what the previous
+  release had to work around. A list attribute takes an ordinary comprehension:
+
+  ```hcl
+  mounts = [for d in var.shared_dirs : { location = d, writable = true }]
+  ```
+
+  Old configurations fail with `Blocks of type "mount" are not expected here`.
+  Behaviour is otherwise unchanged: order is still significant, mounts and port
+  forwards are still applied in place, provisioning still forces replacement, and
+  an empty list still differs from an omitted attribute. Internally this also
+  removed the duplicate validation model the block form required.
+
+### Fixed
+
+- The warning shown after `terraform import` claimed that adding mounts, port
+  forwards or provisioning would force a replacement. That has been true only of
+  provisioning since mounts and port forwards became in-place edits, so the
+  warning discouraged users from a feature the provider had shipped. The same
+  stale claim was in `docs/resources/instance.md` and in the mounts example. A
+  test now derives the expectation from the schema's plan modifiers, so the
+  wording cannot drift from the behaviour again.
+- Per-operation timeout defaults are now reachable. `default_timeout` was seeded
+  with 20 minutes before the per-operation fallbacks were consulted, and since it
+  could never be zero those fallbacks were dead code: every `lima_instance`
+  operation ran on the same 20-minute budget, so `create` got 20 minutes where
+  30 was documented and `read` got 20 minutes where 2 was documented. A user
+  raising `default_timeout` for a slow creation also, silently, gave every
+  refresh the same budget. `default_timeout` is now unset by default and acts
+  purely as an override; when it is absent each operation uses its own default.
+  `lima_disk` applied two different rules across its four operations and now uses
+  the same one throughout, and the three data sources no longer inherit a
+  create-sized budget for a read. A test compares the documented defaults against
+  the constants they describe, which is the check whose absence let this survive.
+- `lima_instance` can now be used with `dynamic "mount"`, `dynamic
+  "port_forward"` and `dynamic "provision"` blocks. Terraform calls
+  `ValidateResourceConfig` before dynamic blocks are expanded, so those lists
+  arrive unknown; the configuration was decoded into Go slices, which cannot
+  represent unknown, and every such configuration failed with a `Value
+  Conversion Error` before planning began. Validation now decodes the
+  configuration into a model holding those blocks as `types.List` and converts
+  them once they are known. Checks that do not depend on block contents, such
+  as instance-name validation, still run.
+- `terraform plan` no longer warns *"No template or config set"* when `config`
+  or `template` is set from a variable, another resource, or any other value
+  that is unknown at validation time. An unknown source says nothing about
+  whether one was provided, so the check is skipped rather than guessed at. The
+  same applies when an unexpanded block might yet carry a typed attribute.
+
+### Added
+
+- `ValidateConfig` warns when a configuration sets `plain: true` alongside
+  `mount` or `port_forward` blocks. Lima ignores both outright in plain mode and
+  never starts the guest agent that implements forwarding, so such a
+  configuration applies cleanly and simply has no forwards — the only symptom
+  being a service that cannot be reached. `lima.PlainMode` exposes the
+  detection.
+
+### Documentation
+
+- `timeouts` was documented as a block. The schema makes it an attribute, so
+  the documented form was rejected outright with `Blocks of type "timeouts" are
+  not expected here`. It is now shown as `timeouts = { ... }`.
+- `additional_disks` was in the schema and in the README's mutability table but
+  absent from the resource page entirely. It now has both a schema entry and a
+  mutability row.
+- Both slipped past the existing tests, which did not check what their names
+  implied: `TestDocumentationCoverage` only asserted that a page exists per
+  type, and `TestMutabilityMatchesDocumentation` compared the schema against a
+  map hardcoded in the test rather than against the documentation. New tests
+  derive from the schema and parse the real table, in both directions, so an
+  undocumented attribute or a stale row now fails the build.
+- Rewrote the local-development instructions. A development override removes
+  the need for `terraform init` to install the *provider*, but `init` is still
+  required for anything else it does, notably installing modules — and an
+  override cannot survive that: init performs version selection for providers
+  required by **state**, overridden providers do not take part, so the first
+  init succeeds and every one after a resource exists fails against the
+  registry. Configurations with both modules and state need a filesystem
+  mirror, which is now documented alongside the two traps it carries: a
+  prerelease version is never selected for an unconstrained requirement, and
+  the dependency lock must be deleted after each rebuild.

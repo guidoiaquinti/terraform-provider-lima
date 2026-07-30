@@ -24,23 +24,29 @@ resource "lima_instance" "dev" {
   memory = "8GiB"
   disk   = "50GiB"
 
-  mount {
-    location    = abspath(path.module)
-    mount_point = "/workspace"
-    writable    = true
-  }
+  mounts = [
+    {
+      location    = abspath(path.module)
+      mount_point = "/workspace"
+      writable    = true
+    },
+  ]
 
-  port_forward {
-    guest_port = 8080
-    host_port  = 18080
-    protocol   = "tcp"
-  }
+  port_forwards = [
+    {
+      guest_port = 8080
+      host_port  = 18080
+      protocol   = "tcp"
+    },
+  ]
 
-  provision {
-    mode        = "system"
-    script      = file("${path.module}/bootstrap.sh")
-    rerun_token = filesha256("${path.module}/bootstrap.sh")
-  }
+  provisions = [
+    {
+      mode        = "system"
+      script      = file("${path.module}/bootstrap.sh")
+      rerun_token = filesha256("${path.module}/bootstrap.sh")
+    },
+  ]
 }
 ```
 
@@ -51,7 +57,7 @@ Later layers win:
 ```text
 Lima defaults
   → template (rendered as a base: reference) or raw config
-    → typed attributes (vm_type, arch, cpus, memory, disk, mount, port_forward, provision)
+    → typed attributes (vm_type, arch, cpus, memory, disk, mounts, port_forwards, provisions)
       → config_overrides
 ```
 
@@ -107,11 +113,34 @@ entirely on Lima's defaults.
   Defaults to `true`.
 - `protect` (Boolean) Whether Lima's deletion protection is enabled. Defaults
   to `false`.
-- `timeouts` (Block) See [Timeouts](#timeouts).
+- `additional_disks` (List of String) Names of `lima_disk` disks to attach, in
+  order. Each is mounted in the guest at the disk's `mount_point`, normally
+  `/mnt/lima-<name>`. Applied **in place**, stopping and restarting a running
+  instance. A disk is locked while the instance holding it runs, so detach it
+  here before destroying or resizing the `lima_disk`.
+- `timeouts` (Attribute) See [Timeouts](#timeouts).
 
-### Optional — blocks
+### Optional — nested lists
 
-#### `mount`
+These three are **attributes**, not blocks, so each takes an equals sign and a
+list of objects:
+
+```hcl
+mounts = [
+  { location = abspath(path.module), mount_point = "/workspace", writable = true },
+]
+```
+
+Because they are ordinary list attributes, entries can be derived with a `for`
+expression rather than a `dynamic` block:
+
+```hcl
+mounts = [for d in var.shared_dirs : { location = d, writable = true }]
+```
+
+Order is preserved in all three; Lima treats it as significant.
+
+#### `mounts`
 
 - `location` (String, **Required**) Absolute host path. A leading `~` is
   expanded. Symlinks are **not** resolved, so the value stays stable across
@@ -129,7 +158,11 @@ Host portability: mount locations are absolute host paths, so a configuration
 with `/Users/alice/project` will not apply on a Linux host. Use
 `abspath(path.module)` or a variable to keep configurations portable.
 
-#### `port_forward`
+Setting `mounts = []` is meaningfully different from omitting it. An omitted
+attribute leaves Lima's own mounts alone; an empty list is a request to unmount
+everything the provider previously declared.
+
+#### `port_forwards`
 
 - `guest_port` (Number, **Required**) 1–65535.
 - `host_port` (Number) 1–65535. Lima chooses one when omitted.
@@ -143,7 +176,9 @@ Duplicate guest ports and duplicate host ports are rejected at plan time.
 The provider does **not** expose guest IP addresses. They are not reliable
 across Lima's networking modes; use the forwarded host endpoint instead.
 
-#### `provision`
+As with `mounts`, an empty list and an omitted attribute differ.
+
+#### `provisions`
 
 - `mode` (String) Lima provisioning mode. Defaults to `system`.
 - `script` (String, **Required**, Sensitive) Script body. Never echoed in
@@ -188,19 +223,28 @@ No private key material is placed in state. `ssh_config` is a path.
 
 ## Timeouts
 
-- `create` — default `30m` (or the provider's `default_timeout`)
+- `create` — default `30m`
 - `update` — default `20m`
 - `delete` — default `20m`
 - `read` — default `2m`
 
+Setting the provider's `default_timeout` replaces **all four**, so a value chosen
+to accommodate a slow creation also applies to every refresh. Leave it unset to
+keep the per-operation defaults above.
+
+`timeouts` is an **attribute**, not a block, so it takes an equals sign:
+
 ```hcl
 resource "lima_instance" "dev" {
   # ...
-  timeouts {
+  timeouts = {
     create = "45m"
   }
 }
 ```
+
+Writing it as a block fails before planning, with
+`Blocks of type "timeouts" are not expected here`.
 
 Timeouts are enforced through context cancellation, so a `limactl` process is
 signalled rather than left running.
@@ -223,9 +267,10 @@ actual behaviour.
 | `disk`             | **In place** growth; shrinking **fails at plan time**    |
 | `start`            | In place — start or stop                                 |
 | `protect`          | In place — `limactl protect` / `unprotect`               |
-| `mount`            | **In place** — stop, `limactl edit --set`, restart       |
-| `port_forward`     | **In place** — stop, `limactl edit --set`, restart       |
-| `provision`        | Replace                                                  |
+| `mounts`           | **In place** — stop, `limactl edit --set`, restart       |
+| `port_forwards`    | **In place** — stop, `limactl edit --set`, restart       |
+| `provisions`       | Replace                                                  |
+| `additional_disks` | **In place** — stop, `limactl edit --set`, restart       |
 
 ### In-place resizing
 
@@ -297,9 +342,9 @@ the VM.
 ### Why the remaining attributes still replace
 
 `arch` has no `edit` flag, and changing it would invalidate the disk image.
-`mount` has `--mount` flags, but they append rather than declaratively replace a
-list, so reconciling a Terraform list against them is not reliable.
-`port_forward` and `provision` have no `edit` flags at all. `vm_type` does have
+`mounts` has `--mount` flags, but they append rather than declaratively replace
+a list, so reconciling a Terraform list against them is not reliable.
+`port_forwards` and `provisions` have no `edit` flags at all. `vm_type` does have
 `--vm-type`, but switching backend under an existing disk image is not a change
 the provider can verify is safe, so it stays a replacement.
 
@@ -331,7 +376,7 @@ The provider **does not** detect:
 
 ### Mount and port-forward drift is restored in place
 
-Every `mount` and `port_forward` you declare is compared against Lima's
+Every `mounts` and `port_forwards` entry you declare is compared against Lima's
 resolved configuration on refresh. If one was changed or removed outside
 Terraform, state is updated to match reality, so `terraform plan` shows an
 ordinary diff and `terraform apply` **restores it in place** — the instance is
@@ -390,8 +435,8 @@ reality plans clean:
 `cpus`, `memory`, `disk`, `vm_type`, `arch`, `start`, `protect`, and all the
 read-only attributes.
 
-**Left unset:** `template`, `config`, `config_overrides`, and all `mount`,
-`port_forward` and `provision` blocks. Lima does not record which template an
+**Left unset:** `template`, `config`, `config_overrides`, `mounts`,
+`port_forwards` and `provisions`. Lima does not record which template an
 instance came from, and its resolved configuration cannot be distinguished
 from defaults, so populating these would invent configuration.
 
@@ -452,9 +497,13 @@ future replacement, and someone adopting an instance may legitimately not know
 its exact origin. Blocking the apply would make import harder for no safety
 gain.
 
-Adding a `mount`, `port_forward` or `provision` block after import **does**
-plan a replacement, because the provider has no way to apply one to an
-existing instance.
+Adding `mounts` or `port_forwards` entries after import does **not** plan a
+replacement. They are applied in place on the next apply, exactly as any other
+change to them is: the instance is stopped, reconfigured with
+`limactl edit --set` and started again.
+
+Adding `provisions` **does** plan a replacement, because Lima runs provisioning
+only at creation time and offers no supported way to re-run it.
 
 ## Partial creation
 

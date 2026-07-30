@@ -274,7 +274,7 @@ func TestToRenderRequestIncludesAttachedDisks(t *testing.T) {
 		Template:        types.StringValue("template:ubuntu"),
 		AdditionalDisks: list,
 	}
-	req, d := model.toRenderRequest(ctx)
+	req, d := model.toRenderRequest(declaredLists{})
 	if d.HasError() {
 		t.Fatalf("toRenderRequest: %v", d)
 	}
@@ -308,7 +308,7 @@ func TestToRenderRequestOmitsUnmanagedDisks(t *testing.T) {
 		Template:        types.StringValue("template:ubuntu"),
 		AdditionalDisks: types.ListNull(types.StringType),
 	}
-	req, d := model.toRenderRequest(context.Background())
+	req, d := model.toRenderRequest(declaredLists{})
 	if d.HasError() {
 		t.Fatalf("toRenderRequest: %v", d)
 	}
