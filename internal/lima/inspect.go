@@ -17,8 +17,6 @@ type Status string
 const (
 	StatusRunning  Status = "running"
 	StatusStopped  Status = "stopped"
-	StatusStarting Status = "starting"
-	StatusStopping Status = "stopping"
 	StatusCreating Status = "creating"
 	StatusBroken   Status = "broken"
 	StatusUnknown  Status = "unknown"
@@ -26,9 +24,15 @@ const (
 
 // AllStatuses lists every value the provider may report, for documentation and
 // schema description purposes.
+//
+// It holds only values NormalizeStatus can actually return. Earlier revisions
+// also advertised "starting" and "stopping", which nothing mapped to: Lima
+// reports Running, Stopped, Uninitialized, Installing, Broken or an empty status
+// (CLI contract §4.7), so a configuration waiting for "starting" waited forever.
+// A transition Lima introduces later arrives as "unknown" with the original in
+// raw_status, which is the honest reading of a value this version does not know.
 var AllStatuses = []Status{
-	StatusRunning, StatusStopped, StatusStarting,
-	StatusStopping, StatusCreating, StatusBroken, StatusUnknown,
+	StatusRunning, StatusStopped, StatusCreating, StatusBroken, StatusUnknown,
 }
 
 // rawStatusMap maps Lima's status strings onto the normalised vocabulary.

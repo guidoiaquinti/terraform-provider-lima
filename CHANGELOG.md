@@ -11,6 +11,22 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Changed
 
+- **Breaking.** `lima_instance` no longer has an `id` attribute. It held exactly
+  the same value as `instance_name` for the resource's whole life, so it was two
+  attributes for one fact; terraform-plugin-framework, unlike the older SDK, does
+  not require one. Replace `lima_instance.x.id` with
+  `lima_instance.x.instance_name`. Import is unaffected — the import ID is still
+  the real Lima instance name. `lima_disk` and the data sources keep their `id`
+  for now.
+- `config` and `config_overrides` are no longer marked sensitive. Marking them
+  meant every change to the primary configuration attribute rendered as
+  `(sensitive value)`, so a user editing one line of Lima YAML could not review
+  the diff — the opposite of what putting a VM definition in version control is
+  for. Redaction is unchanged where content would leak without being asked for:
+  YAML parse errors still never echo the document, `RedactArgs` still masks
+  sensitive flags, and `provisions[].script` is still sensitive. If you embed a
+  secret in raw Lima YAML it will now appear in plan output and in state; pass it
+  through a provisioning script from a sensitive variable instead.
 - **Breaking.** The `mount`, `port_forward` and `provision` blocks of
   `lima_instance` are now the list attributes `mounts`, `port_forwards` and
   `provisions`. Migration is mechanical — an equals sign, brackets, and a comma
@@ -46,6 +62,26 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Fixed
 
+- The instance-name length check now runs for the **default** `LIMA_HOME`. It
+  returned early whenever no `home` was configured — which is the default
+  installation, and therefore most users — so the mid-apply
+  `UNIX_PATH_MAX=104` failure it exists to pre-empt still arrived from Lima
+  itself. An unset home now resolves to `~/.lima` before the socket path is
+  measured. Note that a configuration with a long instance name which previously
+  planned and then failed during apply will now fail at plan time instead, which
+  is the intended behaviour but may surface as a new error.
+- `terraform refresh` no longer records `start = false` for an instance whose
+  status settles nothing. The value was derived from `status == "running"`, so a
+  half-created, broken, or newly-introduced status all read as "stopped" and
+  produced a plan proposing a start the user never asked for. Only `running` and
+  `stopped` now overwrite it; anything else leaves the desired state alone. A
+  genuine external stop still surfaces as drift.
+- `status` no longer advertises `starting` or `stopping`. Nothing could return
+  them: Lima reports `Running`, `Stopped`, `Uninitialized`, `Installing`,
+  `Broken` or an empty status, so a configuration waiting for `starting` waited
+  forever. Both schema descriptions are now derived from `lima.AllStatuses`, and
+  a test checks the documentation against it. A status a future Lima introduces
+  still arrives as `unknown` with the original in `raw_status`.
 - The warning shown after `terraform import` claimed that adding mounts, port
   forwards or provisioning would force a replacement. That has been true only of
   provisioning since mounts and port forwards became in-place edits, so the
@@ -53,6 +89,11 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
   stale claim was in `docs/resources/instance.md` and in the mounts example. A
   test now derives the expectation from the schema's plan modifiers, so the
   wording cannot drift from the behaviour again.
+- Creating an instance no longer runs a redundant `limactl list`. The resource
+  probed for a name collision before calling the lifecycle layer, which checks
+  the same thing under the instance lock and returns `ErrAlreadyExists` that the
+  error path already renders as the identical import instruction. The probe cost
+  a full listing per create and could not be authoritative anyway.
 - Per-operation timeout defaults are now reachable. `default_timeout` was seeded
   with 20 minutes before the per-operation fallbacks were consulted, and since it
   could never be zero those fallbacks were dead code: every `lima_instance`

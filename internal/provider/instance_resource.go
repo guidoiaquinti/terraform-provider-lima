@@ -99,8 +99,11 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				MarkdownDescription: "Complete Lima YAML configuration, used instead of `template`. " +
 					"Typed attributes and `config_overrides` are merged over it. " +
 					"Stored normalised, so whitespace and key-order changes do not produce a diff. " +
-					"Conflicts with `template`. Changing this forces a new instance.",
-				Sensitive:     true,
+					"Conflicts with `template`. Changing this forces a new instance.\n\n" +
+					"Not marked sensitive, so changes to it are reviewable in a plan — which is the point of " +
+					"keeping a VM definition in version control. Lima YAML is configuration, not a credential " +
+					"store; if you do embed a secret here it will appear in plan output and in state, so pass it " +
+					"through a `provision` script from a sensitive variable instead.",
 				PlanModifiers: replace,
 				Validators:    []validator.String{YAML("config")},
 			},
@@ -108,8 +111,8 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Optional: true,
 				MarkdownDescription: "YAML fragment merged last, as an escape hatch for Lima options without a typed attribute. " +
 					"Mappings merge key by key, sequences are replaced wholesale, and an explicit `null` removes a key. " +
-					"Changing this forces a new instance.",
-				Sensitive:     true,
+					"Changing this forces a new instance.\n\n" +
+					"Not marked sensitive, for the same reason as `config`.",
 				PlanModifiers: replace,
 				Validators:    []validator.String{YAML(attrConfigOverrides)},
 			},
@@ -272,19 +275,20 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"timeouts": timeouts.AttributesAll(ctx),
 
 			// Computed.
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The real Lima instance name, which is also the import ID.",
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-			},
+			//
+			// There is deliberately no `id`. It held exactly the same value as
+			// instance_name for the whole life of the resource, so it was two
+			// attributes for one fact. terraform-plugin-framework does not
+			// require one.
 			"instance_name": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The real Lima instance name, that is `name_prefix` followed by `name`.",
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Computed: true,
+				MarkdownDescription: "The real Lima instance name, that is `name_prefix` followed by `name`. " +
+					"This is also the import ID.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"status": schema.StringAttribute{
 				Computed: true,
-				MarkdownDescription: "Normalised instance status: one of `running`, `stopped`, `starting`, `stopping`, `creating`, `broken` or `unknown`. " +
+				MarkdownDescription: "Normalised instance status: one of " + statusVocabulary() + ". " +
 					"A Lima status the provider does not recognise maps to `unknown`, with the original preserved in `raw_status`.",
 			},
 			"raw_status": schema.StringAttribute{
@@ -553,24 +557,11 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Collision detection happens before anything is created, so the user
-	// gets an import instruction rather than Lima's terse message.
-	existing, err := r.data.Service.Exists(ctx, name)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			fmt.Sprintf("Unable to check for an existing Lima instance %q", name),
-			formatCommandError(err))
-		return
-	}
-	if existing {
-		resp.Diagnostics.AddError(
-			fmt.Sprintf("Unable to create Lima instance %q", name),
-			fmt.Sprintf("An instance with that name already exists in %s.\n\n"+
-				"Import it instead:\n\n    terraform import %s %s",
-				homeLabel(r.data), r.resourceAddress(req.Config.Raw.String()), name))
-		return
-	}
-
+	// Collision detection is left to Service.Create, which checks under the
+	// instance lock and returns ErrAlreadyExists. addCreateError turns that into
+	// the same import instruction this function used to emit itself. Probing
+	// first cost an extra full `limactl list` per create and could not be
+	// authoritative anyway, since the answer can change before the create runs.
 	tflog.Debug(ctx, "creating instance", map[string]any{"name": name, "config_hash": hash})
 
 	result, err := r.data.Service.Create(ctx, lima.CreateParams{
@@ -655,9 +646,10 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// start reflects observed reality so an externally stopped instance
-	// shows as drift.
-	state.Start = types.BoolValue(inst.Status() == lima.StatusRunning)
+	// start reflects observed reality so an externally stopped instance shows as
+	// drift, but only where Lima reports a state that settles the question. See
+	// observedStart.
+	state.Start = observedStart(state.Start, inst)
 
 	// config_hash is derived from configuration, not from Lima, so it is
 	// recomputed rather than read back. Recomputing keeps it correct after a
@@ -863,7 +855,6 @@ func (r *instanceResource) ImportState(ctx context.Context, req resource.ImportS
 		path  path.Path
 		value attr.Value
 	}{
-		{path.Root("id"), types.StringValue(inst.Name)},
 		{path.Root("instance_name"), types.StringValue(inst.Name)},
 		{path.Root("name"), types.StringValue(logical)},
 		{path.Root("start"), types.BoolValue(inst.Status() == lima.StatusRunning)},
@@ -960,17 +951,7 @@ func (r *instanceResource) stateName(m *instanceModel) string {
 	if !m.InstanceName.IsNull() && m.InstanceName.ValueString() != "" {
 		return m.InstanceName.ValueString()
 	}
-	if !m.ID.IsNull() && m.ID.ValueString() != "" {
-		return m.ID.ValueString()
-	}
 	return effectiveName(r.data.NamePrefix, m.Name.ValueString())
-}
-
-// resourceAddress produces a plausible import address for the error message.
-// The exact resource label is not available here, so a placeholder is used
-// when it cannot be determined.
-func (r *instanceResource) resourceAddress(string) string {
-	return "lima_instance.example"
 }
 
 // troubleshoot suggests the command most likely to explain a failure.

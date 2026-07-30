@@ -44,8 +44,9 @@ data "lima_instance" "managed" {
 ### Read-only
 
 - `id` (String) The Lima instance name.
-- `status` (String) Normalised status: `running`, `stopped`, `starting`,
-  `stopping`, `creating`, `broken` or `unknown`.
+- `status` (String) Normalised status: `running`, `stopped`, `creating`,
+  `broken` or `unknown`. A status Lima introduces that this provider version does
+  not recognise maps to `unknown`, with the original preserved in `raw_status`.
 - `raw_status` (String) The status exactly as Lima reported it.
 - `arch` (String) Machine architecture, for example `aarch64`.
 - `vm_type` (String) VM backend, for example `vz` or `qemu`.

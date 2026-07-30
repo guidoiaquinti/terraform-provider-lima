@@ -92,11 +92,17 @@ entirely on Lima's defaults.
 - `template` (String) Lima template to build on, such as `template:ubuntu`,
   `template:docker`, or a path to a local template file. Rendered as a `base:`
   entry. Conflicts with `config`.
-- `config` (String, Sensitive) Complete Lima YAML used instead of `template`.
+- `config` (String) Complete Lima YAML used instead of `template`.
   Normalised before hashing, so whitespace and key-order changes do not
   produce a diff. Conflicts with `template`.
-- `config_overrides` (String, Sensitive) YAML fragment merged last, as an
+- `config_overrides` (String) YAML fragment merged last, as an
   escape hatch for Lima options without a typed attribute.
+
+  Neither is marked sensitive, so a change to either is reviewable in a plan.
+  Lima YAML is configuration rather than a credential store; a secret embedded
+  here would appear in plan output and in state, so pass one through a
+  `provisions` script from a sensitive variable instead. Provisioning script
+  bodies **are** sensitive.
 
 ### Optional — typed VM attributes
 
@@ -193,10 +199,15 @@ provisioning field), which replaces the instance.
 
 ### Read-only
 
-- `id` (String) The real Lima instance name; also the import ID.
-- `instance_name` (String) The real Lima instance name (`name_prefix` + `name`).
-- `status` (String) Normalised status: `running`, `stopped`, `starting`,
-  `stopping`, `creating`, `broken` or `unknown`.
+- `instance_name` (String) The real Lima instance name (`name_prefix` + `name`);
+  also the import ID.
+
+  There is deliberately **no `id`**. It held the same value as `instance_name`
+  for the resource's whole life, so it was two attributes for one fact, and
+  terraform-plugin-framework does not require one. Use `instance_name`.
+- `status` (String) Normalised status: `running`, `stopped`, `creating`,
+  `broken` or `unknown`. A status Lima introduces that this provider version does
+  not recognise maps to `unknown`, with the original preserved in `raw_status`.
 - `raw_status` (String) The status exactly as Lima reported it, e.g. `Running`.
 - `ssh_address` (String) Host address for SSH, normally `127.0.0.1`.
 - `ssh_port` (Number) Host port forwarded to guest SSH.

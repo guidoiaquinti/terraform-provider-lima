@@ -2,6 +2,8 @@ package lima
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -155,13 +157,41 @@ const unixPathMax = 104
 // by the caller.
 const sshSockSuffix = "/ssh.sock.1234567890123456"
 
+// DefaultHomeDir is the directory Lima uses when LIMA_HOME is unset.
+const DefaultHomeDir = ".lima"
+
+// ResolveHome returns the directory Lima will actually use.
+//
+// An empty configured value means Lima's own default, `~/.lima`. Resolving it
+// matters because the socket-path check below is only meaningful against a real
+// path: skipping it whenever no home was configured meant skipping it for every
+// default installation, which is most of them.
+//
+// An empty result means the home could not be determined at all, in which case
+// callers must not guess.
+func ResolveHome(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, DefaultHomeDir)
+}
+
 // ValidateNameForHome checks that an instance directory's socket path will fit
 // inside UNIX_PATH_MAX for the given LIMA_HOME.
 //
 // Lima only discovers this at create time and fails mid-apply; checking it up
 // front turns a confusing failure into an actionable plan-time error.
+//
+// An empty home is resolved to Lima's default rather than treated as "nothing to
+// check", so the common case is covered.
 func ValidateNameForHome(name, home string) error {
+	home = ResolveHome(home)
 	if home == "" {
+		// No home could be determined, so there is no path to measure.
 		return nil
 	}
 	total := len(home) + 1 + len(name) + len(sshSockSuffix)

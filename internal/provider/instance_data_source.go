@@ -47,8 +47,9 @@ func (d *instanceDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				MarkdownDescription: "The Lima instance name.",
 			},
 			"status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Normalised status: one of `running`, `stopped`, `starting`, `stopping`, `creating`, `broken` or `unknown`.",
+				Computed: true,
+				MarkdownDescription: "Normalised status: one of " + statusVocabulary() + ". " +
+					"A Lima status the provider does not recognise maps to `unknown`, with the original preserved in `raw_status`.",
 			},
 			"raw_status": schema.StringAttribute{
 				Computed:            true,

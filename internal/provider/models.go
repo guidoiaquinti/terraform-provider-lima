@@ -52,8 +52,8 @@ type instanceModel struct {
 	// Effective configuration.
 	ConfigHash types.String `tfsdk:"config_hash"`
 
-	// Observed runtime state.
-	ID           types.String `tfsdk:"id"`
+	// Observed runtime state. There is no ID field: the resource has no `id`
+	// attribute, because it duplicated instance_name exactly.
 	InstanceName types.String `tfsdk:"instance_name"`
 	Status       types.String `tfsdk:"status"`
 	RawStatus    types.String `tfsdk:"raw_status"`
@@ -244,7 +244,6 @@ func (m *instanceModel) toRenderRequest(lists declaredLists) (lima.RenderRequest
 // exactly as the user wrote them, because Lima resolves defaults that would
 // otherwise appear as drift on every plan.
 func (m *instanceModel) applyInstance(inst lima.Instance) {
-	m.ID = types.StringValue(inst.Name)
 	m.InstanceName = types.StringValue(inst.Name)
 	m.Status = types.StringValue(string(inst.Status()))
 	m.RawStatus = types.StringValue(inst.RawStatus)
@@ -285,6 +284,25 @@ func (m *instanceModel) applyObservedConfig(inst lima.Instance) {
 	}
 	if !m.Arch.IsNull() && inst.Arch != "" {
 		m.Arch = types.StringValue(inst.Arch)
+	}
+}
+
+// observedStart returns the run state to record for a refresh.
+//
+// Only a definitive observation overwrites the desired state. Deriving it from
+// `status == running` meant every other status read as "stopped", so a
+// half-created instance, a broken one, or a status a newer Lima introduces would
+// all record start = false and produce a diff proposing a start the user never
+// asked for. Leaving the value alone keeps a genuine external stop visible while
+// staying quiet about a state that answers nothing.
+func observedStart(current types.Bool, inst lima.Instance) types.Bool {
+	switch inst.Status() {
+	case lima.StatusRunning:
+		return types.BoolValue(true)
+	case lima.StatusStopped:
+		return types.BoolValue(false)
+	default:
+		return current
 	}
 }
 

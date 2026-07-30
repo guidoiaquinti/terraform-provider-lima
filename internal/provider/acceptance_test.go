@@ -245,7 +245,6 @@ resource "lima_instance" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("lima_instance.test", "name", name),
 					resource.TestCheckResourceAttr("lima_instance.test", "instance_name", name),
-					resource.TestCheckResourceAttr("lima_instance.test", "id", name),
 					resource.TestCheckResourceAttr("lima_instance.test", "status", "running"),
 					resource.TestCheckResourceAttr("lima_instance.test", "raw_status", "Running"),
 					resource.TestCheckResourceAttr("lima_instance.test", "start", "true"),

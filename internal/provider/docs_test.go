@@ -128,6 +128,48 @@ func TestMutabilityTableMatchesTheSchema(t *testing.T) {
 	}
 }
 
+// The documented status vocabulary must be the one the provider can return.
+//
+// Both resource and data source pages listed `starting` and `stopping`, which
+// NormalizeStatus never produces, so a reader could reasonably wait for a
+// transition that never arrives. Checking the docs against lima.AllStatuses makes
+// adding a status a two-line change instead of a silent inconsistency.
+func TestDocumentedStatusesMatchTheVocabulary(t *testing.T) {
+	t.Parallel()
+
+	for _, page := range []string{
+		filepath.Join("..", "..", "docs", "resources", "instance.md"),
+		filepath.Join("..", "..", "docs", "data-sources", "instance.md"),
+	} {
+		body, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatalf("reading %s: %v", page, err)
+		}
+		doc := string(body)
+
+		// The `status` bullet, up to the end of its sentence.
+		line := regexp.MustCompile(`(?s)- ` + "`status`" + ` \(String\) Normalised status: (.*?)\.\s`)
+		m := line.FindStringSubmatch(doc)
+		if m == nil {
+			t.Errorf("%s has no parseable `status` description", page)
+			continue
+		}
+		listed := m[1]
+
+		for _, s := range lima.AllStatuses {
+			if !strings.Contains(listed, "`"+string(s)+"`") {
+				t.Errorf("%s: status %q is in lima.AllStatuses but not documented; found %q", page, s, listed)
+			}
+		}
+		// And nothing the provider cannot return.
+		for _, bogus := range []string{"starting", "stopping"} {
+			if strings.Contains(listed, "`"+bogus+"`") {
+				t.Errorf("%s documents status %q, which the provider never returns", page, bogus)
+			}
+		}
+	}
+}
+
 // The import warning tells the user what declaring each list attribute will do
 // after an import. It claimed all three forced replacement, which stopped being
 // true when mounts and port forwards became in-place edits, so it discouraged

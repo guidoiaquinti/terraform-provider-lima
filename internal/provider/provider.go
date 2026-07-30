@@ -390,6 +390,23 @@ func asCommandError(err error, target **lima.CommandError) bool {
 	return errors.As(err, target)
 }
 
+// statusVocabulary renders the statuses the provider can report, for a schema
+// description.
+//
+// Derived from lima.AllStatuses rather than written out, because the hand-written
+// lists had drifted: both schemas and both documentation pages advertised
+// `starting` and `stopping`, which nothing could ever return.
+func statusVocabulary() string {
+	labels := make([]string, 0, len(lima.AllStatuses))
+	for _, s := range lima.AllStatuses {
+		labels = append(labels, "`"+string(s)+"`")
+	}
+	if len(labels) < 2 {
+		return strings.Join(labels, "")
+	}
+	return strings.Join(labels[:len(labels)-1], ", ") + " or " + labels[len(labels)-1]
+}
+
 // homeLabel describes the LIMA_HOME a diagnostic is talking about.
 //
 // Shared by every resource and data source, so the phrasing users see is

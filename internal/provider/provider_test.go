@@ -135,7 +135,7 @@ func TestInstanceResourceSchema(t *testing.T) {
 	}
 
 	computed := []string{
-		"id", "instance_name", "status", "raw_status", "ssh_address", "ssh_port",
+		"instance_name", "status", "raw_status", "ssh_address", "ssh_port",
 		"ssh_user", "ssh_config", "hostname", "dir", "config_hash", "lima_version",
 	}
 	for _, name := range computed {
@@ -154,6 +154,12 @@ func TestInstanceResourceSchema(t *testing.T) {
 
 	if !resp.Schema.Attributes["name"].IsRequired() {
 		t.Error("name should be required")
+	}
+
+	// `id` held the same value as instance_name for the resource's whole life, so
+	// it was two attributes for one fact. The framework does not require one.
+	if _, ok := resp.Schema.Attributes["id"]; ok {
+		t.Error("the instance schema has an `id` attribute again; instance_name is the identifier")
 	}
 
 	// Nested attributes rather than blocks, so a user can build them with a
@@ -179,10 +185,16 @@ func TestSensitiveAttributesAreMarked(t *testing.T) {
 	resp := &fwresource.SchemaResponse{}
 	NewInstanceResource().Schema(context.Background(), fwresource.SchemaRequest{}, resp)
 
-	// These can carry credentials or private configuration.
-	for _, name := range []string{"config", "config_overrides"} {
-		if !resp.Schema.Attributes[name].IsSensitive() {
-			t.Errorf("attribute %q should be marked sensitive", name)
+	// config and config_overrides are deliberately NOT sensitive. Marking them
+	// rendered every change to the primary configuration attribute as
+	// "(sensitive value)", so a user editing one line of Lima YAML could not
+	// review the diff — the opposite of what keeping a VM definition in version
+	// control is for. Redaction still happens where content would leak without
+	// the user asking for it: parse errors never echo the document, and
+	// RedactArgs masks sensitive flags.
+	for _, name := range []string{"config", attrConfigOverrides} {
+		if resp.Schema.Attributes[name].IsSensitive() {
+			t.Errorf("attribute %q is marked sensitive; plan diffs for it become unreviewable", name)
 		}
 	}
 

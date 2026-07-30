@@ -367,3 +367,29 @@ func TestEmptyConfigViewReportsNothingPresent(t *testing.T) {
 		t.Error("an empty config view reported a port forward")
 	}
 }
+
+// Every status the provider advertises must be one it can actually produce.
+//
+// `starting` and `stopping` were in AllStatuses and in both schema descriptions,
+// but nothing mapped to them: Lima defines Running, Stopped, Uninitialized,
+// Installing, Broken and an empty status (CLI contract §4.7). A user waiting for
+// `status == "starting"` would therefore wait forever, and a reader of the docs
+// would reasonably expect a transition the provider never reports.
+func TestEveryAdvertisedStatusIsReachable(t *testing.T) {
+	t.Parallel()
+
+	// Every raw value Lima is known to emit, plus one it does not, so the
+	// unknown fallback counts as reachable too.
+	reachable := map[Status]bool{}
+	for _, raw := range []string{
+		"Running", "Stopped", "Broken", "Uninitialized", "Installing", "", "Hibernating",
+	} {
+		reachable[NormalizeStatus(raw)] = true
+	}
+
+	for _, s := range AllStatuses {
+		if !reachable[s] {
+			t.Errorf("AllStatuses advertises %q, but NormalizeStatus can never return it", s)
+		}
+	}
+}

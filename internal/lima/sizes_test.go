@@ -2,6 +2,8 @@ package lima
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -179,7 +181,9 @@ func TestValidateNameForHome(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "no home means no check",
+			// An unset home is the common case, not an exemption: Lima falls
+			// back to ~/.lima, so the check has to run against that.
+			name: "unset home is resolved rather than skipped",
 			inst: "dev",
 			home: "",
 		},
@@ -309,5 +313,49 @@ func TestGiBFlagValueIsByteExact(t *testing.T) {
 		if got := int64(float64(f) * (1 << 30)); got != bytes {
 			t.Fatalf("%d MiB round-tripped to %d bytes via %q, want %d", mib, got, s, bytes)
 		}
+	}
+}
+
+// ResolveHome decides which directory the socket-path check is measured against.
+//
+// The check previously did nothing when home was empty — which is precisely the
+// default installation — so the failure it exists to pre-empt still arrived
+// mid-apply from Lima itself for most users.
+func TestResolveHome(t *testing.T) {
+	t.Parallel()
+
+	if got := ResolveHome("/tmp/lima"); got != "/tmp/lima" {
+		t.Errorf("ResolveHome(%q) = %q, want it unchanged", "/tmp/lima", got)
+	}
+
+	// An unset home must resolve to Lima's own default rather than to nothing.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no user home directory on this host: %v", err)
+	}
+	if got, want := ResolveHome(""), filepath.Join(home, ".lima"); got != want {
+		t.Errorf("ResolveHome(\"\") = %q, want %q", got, want)
+	}
+}
+
+// A name that cannot fit under the *default* home must be rejected at plan time
+// too, not only when the user configured an explicit home.
+func TestValidateNameForHomeChecksTheDefaultHome(t *testing.T) {
+	t.Parallel()
+
+	if _, err := os.UserHomeDir(); err != nil {
+		t.Skipf("no user home directory on this host: %v", err)
+	}
+
+	// Long enough that no plausible ~/.lima can accommodate it: the fixed
+	// socket suffix alone is 26 characters, and the limit is 104.
+	tooLong := strings.Repeat("a", 63)
+	if err := ValidateNameForHome(tooLong, ""); err == nil {
+		t.Error("a 63-character name passed the check against the default home; the check is not running")
+	}
+
+	// A short name must still be accepted, or every default install breaks.
+	if err := ValidateNameForHome("dev", ""); err != nil {
+		t.Errorf("ValidateNameForHome(\"dev\", \"\") = %v, want nil", err)
 	}
 }
