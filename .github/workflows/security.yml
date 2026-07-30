@@ -116,8 +116,17 @@ jobs:
           # already opens a pull request for those, and blocking on them trains
           # people to merge past the gate.
           fail-on-severity: moderate
-          # A provider inherits the licence obligations of what it links. GPL
-          # incompatibility is the case that actually bites, and it is silent
-          # until someone audits a release.
-          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later, LGPL-2.0-or-later
+          # This provider is Apache-2.0 and ships as one statically linked
+          # binary, so a copyleft dependency is not a compatibility footnote —
+          # it changes what every user of the compiled provider is obliged to
+          # do, and it does so silently until somebody audits a release.
+          #
+          # MPL-2.0 is deliberately absent from this list: its copyleft is
+          # file-level and does not propagate to a larger work, which is why the
+          # HashiCorp plugin framework can be linked here at all.
+          deny-licenses: >-
+            GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later,
+            AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later,
+            LGPL-2.0-only, LGPL-2.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later,
+            LGPL-3.0-only, LGPL-3.0-or-later
           comment-summary-in-pr: on-failure

@@ -11,6 +11,43 @@ Nothing released yet. The first entry will be added when `0.1.0` is tagged.
 
 ### Changed
 
+- **Relicensed from GPL-3.0 to Apache-2.0.**
+
+  The repository carried GPL-3.0 while nothing stated a licence anywhere a user
+  would read it — the README had no licence section at all, and `CONTRIBUTING.md`
+  only linked the file. An unexplained copyleft licence on a Terraform provider
+  reads as an accident of a template rather than a decision.
+
+  Apache-2.0 fits what this project is. A provider is an integration layer whose
+  value is the recorded `limactl` contract, not an implementation worth keeping
+  secret, so copyleft protects little here; and it is installed inside companies,
+  where blanket "no copyleft" policies are enforced by scanners matching on the
+  licence identifier rather than on how the code is actually combined.
+  Apache-2.0 also carries an express patent grant that MIT and BSD lack, and it
+  matches the ecosystem — HashiCorp's providers are MPL-2.0, and
+  terraform-provider-libvirt is Apache-2.0.
+
+  Worth recording for anyone who wonders why not GPL-2.0, the kernel's licence:
+  three modules linked into the binary are Apache-2.0 (`grpc`, `genproto`,
+  `oklog/run`), and Apache-2.0 is incompatible with GPL-2.0 — its patent
+  termination and indemnification terms are "further restrictions" that GPLv2 §6
+  forbids. Since Terraform's plugin protocol *is* gRPC, those modules are
+  unavoidable, so GPL-2.0 was never actually available. GPL-3.0 was compatible;
+  it was simply not the right fit.
+
+  Every source file now carries an `SPDX-License-Identifier: Apache-2.0` header.
+  The change was made while the repository had a single copyright holder and no
+  outside contributors, which is the only cheap moment to make it.
+- **Release archives now include `THIRD-PARTY-NOTICES.md`.** The provider ships
+  as one statically linked binary containing 26 modules under Apache-2.0,
+  MPL-2.0, BSD and MIT. All of those licences require their copyright notices to
+  accompany a binary redistribution, and the archives previously carried only
+  this project's own `LICENSE` — satisfying our licence and none of theirs.
+
+  The file is generated from the module graph by `make notices`, with no tool
+  dependency to keep pinned, and `make notices-check` fails `make check` and CI
+  when it goes stale. A dependency change that is not reflected there is a
+  defective release rather than a cosmetic omission.
 - **Every CI job now runs on a free runner class.** The macOS acceptance job used
   `macos-15-large`, which GitHub bills even for public repositories, on every
   pull request with a 120-minute timeout — the one job here that was not free.

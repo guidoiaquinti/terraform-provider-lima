@@ -1,3 +1,6 @@
+// Copyright 2026 Guido Iaquinti
+// SPDX-License-Identifier: Apache-2.0
+
 package lima
 
 import (

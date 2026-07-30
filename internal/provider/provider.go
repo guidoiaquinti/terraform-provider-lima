@@ -1,3 +1,6 @@
+// Copyright 2026 Guido Iaquinti
+// SPDX-License-Identifier: Apache-2.0
+
 // Package provider implements the Terraform provider for Lima.
 //
 // It is the top layer of a three-layer design:

@@ -177,12 +177,36 @@ tidy: ## Tidy go.mod and go.sum
 	go mod tidy
 
 .PHONY: check
-check: fmt-check vet test lint build docs-check ## Run every quality gate
+check: fmt-check vet test lint build docs-check notices-check ## Run every quality gate
 
 .PHONY: tools
 tools: ## Show the pinned versions of the tools this repo drives
 	@echo "tfplugindocs: $$(go tool tfplugindocs --version 2>/dev/null || echo 'run: go mod download')"
 	@echo "golangci-lint: $$(golangci-lint version 2>/dev/null || echo 'not installed')"
+
+.PHONY: notices
+notices: ## Regenerate THIRD-PARTY-NOTICES.md from the module graph
+	@# Apache-2.0 §4, the BSD licences and MIT all require reproducing copyright
+	@# notices in binary redistributions. A Go provider is one statically linked
+	@# binary containing all of them, so shipping only our own LICENSE satisfies
+	@# our licence and none of theirs.
+	./scripts/gen-notices.sh
+
+.PHONY: notices-check
+notices-check: ## Fail if THIRD-PARTY-NOTICES.md is stale
+	@# Same snapshot-and-compare shape as docs-check, and for the same reason:
+	@# answers "is this file what the module graph produces" in any git state.
+	@set -e; \
+	before="$$(mktemp)"; \
+	trap 'rm -f "$$before"' EXIT; \
+	cp THIRD-PARTY-NOTICES.md "$$before"; \
+	./scripts/gen-notices.sh >/dev/null; \
+	if ! diff -u "$$before" THIRD-PARTY-NOTICES.md; then \
+		echo; \
+		echo "THIRD-PARTY-NOTICES.md is stale. Run 'make notices' and commit the result."; \
+		exit 1; \
+	fi; \
+	echo "THIRD-PARTY-NOTICES.md matches the module graph"
 
 .PHONY: release-check
 release-check: ## Validate .goreleaser.yml and build every shipped target

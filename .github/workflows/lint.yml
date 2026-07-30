@@ -39,3 +39,22 @@ jobs:
           # outright reaches CI only when that release lands.
           verify: true
           args: --timeout=5m
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # scripts/ is small but real: gen-notices.sh runs in CI and in `make
+      # check`, and its output is a legal notice shipped in every release
+      # archive. It is also the one place in this repository where a portability
+      # mistake is invisible until it runs somewhere else — it was originally
+      # written with `mapfile`, a bash 4 builtin, which fails on the macOS bash
+      # 3.2 that this project is developed against.
+      - name: Run shellcheck
+        run: |
+          shellcheck --version
+          find scripts -name '*.sh' -print -exec shellcheck {} +

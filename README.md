@@ -592,6 +592,41 @@ suspected vulnerability.
 
 See [`ROADMAP.md`](ROADMAP.md).
 
+## Licence
+
+[Apache License 2.0](LICENSE). Every source file carries an
+`SPDX-License-Identifier: Apache-2.0` header.
+
+Apache-2.0 rather than a copyleft licence, deliberately. This provider is an
+integration layer: its value is the recorded `limactl` contract and the
+behaviour built on it, not an implementation anyone would want to keep secret,
+so there is little for copyleft to protect. Meanwhile a provider is something
+people install inside companies, where blanket "no copyleft" policies are
+enforced by scanners that match on the licence identifier rather than on how the
+code is actually combined. Apache-2.0 also carries an express patent grant, which
+MIT and BSD do not.
+
+It matches the ecosystem: HashiCorp's own providers are MPL-2.0, and
+[terraform-provider-libvirt](https://github.com/dmacvicar/terraform-provider-libvirt)
+— the closest comparable project — is Apache-2.0.
+
+### Third-party licences
+
+The provider ships as a statically linked binary containing 26 modules under
+Apache-2.0, MPL-2.0, BSD and MIT. All of those licences require their copyright
+notices to accompany a binary redistribution, so every release archive includes
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) alongside the binary.
+
+That file is generated from the module graph by `make notices`, and
+`make notices-check` — part of `make check` and of CI — fails the build if it no
+longer matches. A dependency change that is not reflected there is a defective
+release, not a cosmetic omission.
+
+Note that the provider runs as a **separate process**, launched by Terraform and
+spoken to over gRPC. It is not linked into Terraform and not linked into your
+configuration, so this licence governs the provider alone.
+
+## References
 
 - https://github.com/lima-vm/lima/discussions/2111
 - https://github.com/dmacvicar/terraform-provider-libvirt#supported-resources--xml-coverage

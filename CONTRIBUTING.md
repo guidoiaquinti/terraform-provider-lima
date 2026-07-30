@@ -211,4 +211,29 @@ Small and coherent. Conventional Commit prefixes (`feat:`, `fix:`, `docs:`,
 
 ## Licence
 
-Contributions are accepted under the [license](LICENSE).
+The project is [Apache-2.0](LICENSE). By contributing you agree that your
+contribution is licensed under it — there is no separate CLA.
+
+Two practical points:
+
+- **New Go files need the header.** Two lines at the top, then a blank line, then
+  the package doc comment if there is one:
+
+  ```go
+  // Copyright 2026 Guido Iaquinti
+  // SPDX-License-Identifier: Apache-2.0
+
+  package lima
+  ```
+
+  The blank line matters: without it the copyright block becomes the package's
+  documentation.
+
+- **New dependencies change the notices.** `THIRD-PARTY-NOTICES.md` reproduces
+  the licence of every module linked into the shipped binary, which Apache-2.0
+  §4, BSD and MIT all require of a binary redistribution. Run `make notices` and
+  commit the result; `make notices-check` fails CI otherwise.
+
+  Please avoid adding a dependency under a copyleft licence. It would not be
+  merely a licence-compatibility question — it would change what users of the
+  compiled provider are obliged to do.

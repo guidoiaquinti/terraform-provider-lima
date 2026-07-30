@@ -1,3 +1,6 @@
+// Copyright 2026 Guido Iaquinti
+// SPDX-License-Identifier: Apache-2.0
+
 // Package lima is the Lima integration layer.
 //
 // It holds two of the provider's three layers:

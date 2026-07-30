@@ -46,6 +46,17 @@ builds:
 archives:
   - formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      # GoReleaser's defaults already pick up LICENSE, README and CHANGELOG.
+      # THIRD-PARTY-NOTICES.md has to be named explicitly, and it is not
+      # optional: the binary statically links 26 modules under Apache-2.0, BSD
+      # and MIT, each of which requires its copyright notice to accompany a
+      # binary redistribution. Our own LICENSE satisfies our licence and none of
+      # theirs.
+      - src: THIRD-PARTY-NOTICES.md
+      - src: LICENSE
+      - src: README.md
+      - src: CHANGELOG.md
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"

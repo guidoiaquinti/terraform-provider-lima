@@ -85,6 +85,14 @@ jobs:
       - name: Check docs/ matches templates/ and the schema
         run: make docs-check
 
+      # THIRD-PARTY-NOTICES.md reproduces the licence of every module linked
+      # into the shipped binary, which Apache-2.0 §4, BSD and MIT all require of
+      # a binary redistribution. It goes stale silently whenever the dependency
+      # graph changes, and the only symptom is an incomplete legal notice in a
+      # published release.
+      - name: Check THIRD-PARTY-NOTICES.md is current
+        run: make notices-check
+
   # Rehearses the release build, which nothing previously did.
   #
   # This replaces a hand-maintained cross-compile matrix that listed four

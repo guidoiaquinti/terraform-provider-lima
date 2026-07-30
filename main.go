@@ -1,3 +1,6 @@
+// Copyright 2026 Guido Iaquinti
+// SPDX-License-Identifier: Apache-2.0
+
 // terraform-provider-lima manages local Lima virtual machines through the
 // supported limactl command line interface.
 //

@@ -1,3 +1,6 @@
+// Copyright 2026 Guido Iaquinti
+// SPDX-License-Identifier: Apache-2.0
+
 // Package testutil provides test doubles for the Lima command adapter.
 //
 // FakeLimactl implements the lima.Runner interface structurally (it does not
