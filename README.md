@@ -21,7 +21,7 @@ lives in an imperative CLI. If a team's development environment is a Lima VM
 with specific mounts, port forwards and provisioning, that definition tends to
 end up in a README rather than in code.
 
-This provider lets you describe the VM in Terraform, so it can be versioned,
+This provider lets you describe the VM in Terraform / OpenTofu, so it can be versioned,
 reviewed and reproduced like any other infrastructure.
 
 ## Architecture boundary
@@ -177,7 +177,7 @@ warning is printed:
 
 ```console
 $ make build
-$ V=0.1.0
+$ V=0.0.1
 $ DIR="$PWD/mirror/registry.terraform.io/guidoiaquinti/lima/$V/$(go env GOOS)_$(go env GOARCH)"
 $ mkdir -p "$DIR"
 $ cp terraform-provider-lima "$DIR/terraform-provider-lima_v$V"
@@ -199,8 +199,8 @@ provider_installation {
 Two things to know:
 
 - The version in the mirror path must **not** be a prerelease. Terraform will
-  not select one for an unconstrained requirement, so `0.1.0-dev` is silently
-  skipped and you are back to the registry error. Use `0.1.0`; it labels the
+  not select one for an unconstrained requirement, so `0.0.1-dev` is silently
+  skipped and you are back to the registry error. Use `0.0.1`; it labels the
   local build and claims nothing about a release.
 - `terraform init` writes a checksum of the binary into `.terraform.lock.hcl`,
   so **delete the lock file whenever you rebuild** or the next init rejects the
@@ -215,10 +215,10 @@ of making the version in use ambient rather than per-project.
 
 | Provider version | Lima version | Behaviour                                                        |
 | ---------------- | ------------ | ------------------------------------------------------------------ |
-| 0.1.0-dev        | > 2.2.0      | Accepted with a warning. Report incompatibilities as issues.        |
-| 0.1.0-dev        | 2.2.0        | Developed and verified against Lima 2.2.0 on macOS 15 / arm64.      |
-| 0.1.0-dev        | 2.0 – 2.1    | Accepted but **not** exercised. 2.0 is the enforced minimum.        |
-| 0.1.0-dev        | < 2.0        | **Rejected** at provider configuration time.                        |
+| 0.0.1-dev        | > 2.2.0      | Accepted with a warning. Report incompatibilities as issues.        |
+| 0.0.1-dev        | 2.2.0        | Developed and verified against Lima 2.2.0 on macOS 15 / arm64.      |
+| 0.0.1-dev        | 2.0 – 2.1    | Accepted but **not** exercised. 2.0 is the enforced minimum.        |
+| 0.0.1-dev        | < 2.0        | **Rejected** at provider configuration time.                        |
 
 The 2.x floor is a support decision rather than a known incompatibility: the
 provider is neither tested nor exercised against 1.x, so accepting it would

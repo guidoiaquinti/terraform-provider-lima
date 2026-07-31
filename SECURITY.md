@@ -52,5 +52,5 @@ consumes, so the interesting surfaces are:
 
 ## Supported versions
 
-The provider is pre-release (`0.1.0-dev`) and has never been published, so
+The provider is pre-release (`0.0.1-dev`) and has never been published, so
 there are no supported older versions. Fixes land on `main`.

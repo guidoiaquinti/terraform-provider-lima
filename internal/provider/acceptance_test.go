@@ -1348,7 +1348,7 @@ resource "lima_instance" "test" {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					checkLimaHasMount(t, name, declared, "/workspace", true),
-					// The externally added mount is not in Terraform's
+					// The externally added mount is not in Terraform / OpenTofu's
 					// configuration, but it was not declared by the provider
 					// either, so it is left alone rather than silently
 					// removed.

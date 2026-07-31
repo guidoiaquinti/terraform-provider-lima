@@ -7,9 +7,6 @@ on:
       - .github/workflows/**
       - .github/actionlint.yaml
 
-# As we don't have an unlimited amount of GitHub action minutes, let's
-# cancel any currently running job or workflow in the same concurrency group
-# if a new commit is pushed
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,10 +28,6 @@ jobs:
           persist-credentials: false
 
       - name: Download and verify actionlint
-        # curl --fail makes an HTTP/network error a hard failure instead of silently
-        # producing a truncated file; --retry survives the kind of transient blip that
-        # previously surfaced as a cryptic "gzip: unexpected end of file" downstream.
-        # Verifying the published checksum also catches a corrupted-but-complete download.
         env:
           ACTIONLINT_VERSION: 1.7.12
         run: |

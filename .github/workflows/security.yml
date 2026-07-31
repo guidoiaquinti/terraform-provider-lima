@@ -1,13 +1,4 @@
 name: security
-
-# Supply-chain and static-analysis gates.
-#
-# Deliberately a separate workflow from `test`. These jobs answer "is what we
-# depend on safe" rather than "does our code work", they have different trigger
-# needs (a vulnerability can be published on a day nobody pushes, so this runs
-# on a schedule), and two of the three need permissions the test workflow must
-# never hold.
-
 on:
   push:
     branches: [main]
@@ -18,8 +9,6 @@ on:
     # dependency advisory and a Lima regression do not land in the same digest.
     - cron: "0 5 * * 1"
 
-# No workflow-level permissions: each job asks for exactly what it needs, so a
-# job added later starts from nothing.
 permissions: {}
 
 concurrency:
@@ -35,8 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -44,11 +31,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # govulncheck is the one gate here that works on any repository, public or
-      # private, with no GitHub Advanced Security entitlement. It is also the
-      # most precise of the three for a Go project: it reports only advisories
-      # whose vulnerable symbols this code actually reaches, so a hit is
-      # normally real work rather than a dependency-tree coincidence.
       - name: Run govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:

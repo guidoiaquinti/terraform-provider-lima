@@ -1,40 +1,4 @@
 name: acceptance
-
-# Acceptance tests create real virtual machines.
-#
-# The upstream Lima project runs its own VM integration tests on GitHub-hosted
-# runners, which is the evidence this workflow is modelled on. From a recent
-# lima-vm/lima `test.yml` run, the Linux QEMU integration suite took 7.7 minutes
-# on a standard `ubuntu-24.04` runner.
-#
-# EVERY JOB HERE RUNS ON A FREE RUNNER CLASS. That is a deliberate constraint,
-# not an accident of what happened to be available:
-#
-#   ubuntu-24.04       free for public repositories
-#   ubuntu-24.04-arm   free for public repositories since January 2025
-#
-# There is deliberately no macOS job, and it is worth recording why so nobody
-# adds one back expecting it to be free.
-#
-# Lima's `vz` driver is Virtualization.framework, which needs hardware
-# virtualisation. GitHub's Apple-silicon runners are themselves virtual machines
-# and cannot nest it, so `vz` requires an Intel macOS runner — and every Intel
-# macOS runner class (`macos-*-large`) is a *larger* runner, which GitHub bills
-# even for public repositories. Upstream Lima runs all of its macOS jobs,
-# including QEMU-on-macOS, on `macos-15-large` for exactly this reason: there is
-# no free GitHub runner on which Lima can boot a VM on macOS.
-#
-# So macOS coverage is split rather than dropped:
-#
-#   Unit tests        run on macos-latest in test.yml (free, and they need no VM)
-#   vz acceptance     run locally by the maintainer — see README, "Acceptance
-#                     testing", which documents the command
-#
-# The Linux jobs are not a substitute for `vz` and are not pretended to be:
-# `vz` and `qemu` are different Lima drivers. The suite derives the backend and
-# its mount paths from `limactl info` rather than hardcoding either, so the same
-# tests do run on both — just not both in CI.
-
 on:
   pull_request:
   push:
@@ -46,7 +10,7 @@ on:
         required: false
         default: "TestAcc"
   schedule:
-    # Weekly, Monday 04:00 UTC — picks up Lima releases that break us.
+    # Weekly, Monday 04:00 UTC
     - cron: "0 4 * * 1"
 
 permissions:
@@ -70,22 +34,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Both Linux runner classes are free for public repositories, so the
-          # arm64 job runs per-PR alongside amd64. They differ in more than the
-          # host CPU: a different QEMU system emulator, a different EFI
-          # firmware package, and a different guest image for every template.
           - arch: amd64
             runner: ubuntu-24.04
             qemu_packages: qemu-system-x86 qemu-utils ovmf
             lima_asset: Linux-x86_64
             cli: terraform
-          # OpenTofu against real VMs, on amd64 only. The README claims
-          # OpenTofu support and nothing exercised it; this is the job that
-          # makes the claim true. Deliberately not replicated across every
-          # arch and backend: what differs between the two CLIs is the plugin
-          # protocol handshake and the test harness's provider address, none
-          # of which is architecture-dependent, whereas each added VM job
-          # costs ~8 minutes of runner time on every pull request.
           - arch: amd64
             runner: ubuntu-24.04
             qemu_packages: qemu-system-x86 qemu-utils ovmf
@@ -99,8 +52,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -119,18 +70,9 @@ jobs:
         with:
           tofu_version: "latest"
           tofu_wrapper: false
-          # Sets TF_ACC_TERRAFORM_PATH, TF_ACC_PROVIDER_HOST and
-          # TF_ACC_PROVIDER_NAMESPACE for us. Doing it by hand is where the
-          # registry host is easy to get wrong: terraform-plugin-testing
-          # defaults to registry.terraform.io, and a provider address that does
-          # not match what tofu resolves fails with a confusing "provider not
-          # found" rather than an obvious misconfiguration.
           provider_acceptance_tests: true
 
       - name: Install QEMU
-        # The package list goes through the environment rather than being
-        # interpolated into the script, so the shell never sees expanded
-        # workflow-expression text as code.
         env:
           QEMU_PACKAGES: ${{ matrix.qemu_packages }}
         run: |
@@ -166,9 +108,6 @@ jobs:
       - name: Run acceptance tests
         env:
           TF_ACC: "1"
-          # workflow_dispatch input, so attacker-controllable in principle:
-          # passed as an environment value and quoted, never interpolated into
-          # the script text.
           RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
         run: |
           # -count=1 defeats the build cache. Go keys a cached test result on
@@ -184,13 +123,6 @@ jobs:
 
       - name: Clean up any leftover instances and disks
         if: always()
-        # `make sweep` replaces what used to be an inline shell loop here. Two
-        # reasons: it was extracting disk names from JSON with a sed expression
-        # that silently matched nothing if Lima reordered its keys, and the
-        # ordering rule it depended on (instances before disks) lived only in a
-        # comment. Both now live in lima.Sweep, which is unit-tested, and the
-        # sweep refuses Lima's default home so a misconfigured LIMA_HOME here
-        # cannot reach a real machine's VMs.
         run: make sweep SWEEP_HOME=/tmp/ltfci
 
       - name: Remove the isolated LIMA_HOME

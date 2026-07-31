@@ -26,8 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -67,8 +65,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -93,18 +89,6 @@ jobs:
       - name: Check THIRD-PARTY-NOTICES.md is current
         run: make notices-check
 
-  # Rehearses the release build, which nothing previously did.
-  #
-  # This replaces a hand-maintained cross-compile matrix that listed four
-  # targets while .goreleaser.yml shipped ten: freebsd, 386 and arm archives were
-  # first compiled by the tag that published them, so a build failure on those
-  # platforms could only ever be discovered by a user. Building through
-  # GoReleaser instead of `go build` means the thing under test is exactly the
-  # matrix that ships, and it cannot drift from it again.
-  #
-  # `goreleaser check` additionally validates the configuration itself — a
-  # malformed .goreleaser.yml is otherwise found at tag time, when the fix
-  # requires a new tag.
   release-dry-run:
     name: release dry run
     runs-on: ubuntu-latest
@@ -113,8 +97,6 @@ jobs:
         with:
           # Full history: GoReleaser derives the snapshot version from git.
           fetch-depth: 0
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -177,20 +159,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The documented Terraform floor, the current release, and one point
-          # in between so a regression can be bisected without a new job.
           - { cli: terraform, version: "1.0.0" }
           - { cli: terraform, version: "1.5.7" }
           - { cli: terraform, version: "latest" }
-          # The documented OpenTofu floor and its current release. OpenTofu is
-          # claimed as supported in the README and was previously never run.
           - { cli: opentofu, version: "1.6.0" }
           - { cli: opentofu, version: "latest" }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -244,8 +220,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -271,8 +245,7 @@ jobs:
       - name: Check HCL formatting
         env:
           CLI: ${{ matrix.cli == 'opentofu' && 'tofu' || 'terraform' }}
-        # Only once: the two CLIs format identically, and running both would
-        # make an arbitrary one of them the authority on a disagreement.
+
         if: matrix.cli == 'terraform'
         run: |
           "$CLI" fmt -check -recursive ./examples

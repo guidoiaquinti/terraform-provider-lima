@@ -20,8 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The workflow never pushes; leaving the token in .git/config would
-          # let any later step, or an uploaded artifact, carry it away.
           persist-credentials: false
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -32,11 +30,6 @@ jobs:
       - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         with:
           version: latest
-          # Verify the configuration against golangci-lint's own schema before
-          # linting with it. `run` tolerates invalid settings — the goconst
-          # exclusions were a string where an array is required, and were still
-          # applied — so without this a config that a future release rejects
-          # outright reaches CI only when that release lands.
           verify: true
           args: --timeout=5m
 
@@ -48,12 +41,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # scripts/ is small but real: gen-notices.sh runs in CI and in `make
-      # check`, and its output is a legal notice shipped in every release
-      # archive. It is also the one place in this repository where a portability
-      # mistake is invisible until it runs somewhere else — it was originally
-      # written with `mapfile`, a bash 4 builtin, which fails on the macOS bash
-      # 3.2 that this project is developed against.
       - name: Run shellcheck
         run: |
           shellcheck --version

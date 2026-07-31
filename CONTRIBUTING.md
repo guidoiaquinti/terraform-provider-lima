@@ -209,6 +209,15 @@ If any of those is missing, use `RequiresReplace` and document why.
 Small and coherent. Conventional Commit prefixes (`feat:`, `fix:`, `docs:`,
 `test:`, `ci:`, `chore:`) are used to group release notes.
 
+## Releasing
+
+Pushing a `v*` tag builds and signs the release, but several prerequisites are
+outside the repository and fail in ways the error message does not explain — the
+repository has to be public, two signing secrets have to exist, and the registry
+needs the public half of the key. `docs/development/releasing.md` records the
+whole sequence, including why a draft release looks to the registry exactly like
+no release at all.
+
 ## Licence
 
 The project is [Apache-2.0](LICENSE). By contributing you agree that your

@@ -110,10 +110,10 @@ Explicit configuration always takes precedence over an environment variable.
 
 | Provider version | Lima version | Behaviour                                                 |
 | ---------------- | ------------ | --------------------------------------------------------- |
-| 0.1.0-dev        | 2.2.0        | Developed and verified against Lima 2.2.0, macOS 15 arm64. |
-| 0.1.0-dev        | 2.0 – 2.1    | Accepted, not exercised. 2.0 is the enforced minimum.      |
-| 0.1.0-dev        | > 2.2.0      | Accepted with a warning.                                   |
-| 0.1.0-dev        | < 2.0        | **Rejected** at provider configuration time.               |
+| 0.0.1-dev        | 2.2.0        | Developed and verified against Lima 2.2.0, macOS 15 arm64. |
+| 0.0.1-dev        | 2.0 – 2.1    | Accepted, not exercised. 2.0 is the enforced minimum.      |
+| 0.0.1-dev        | > 2.2.0      | Accepted with a warning.                                   |
+| 0.0.1-dev        | < 2.0        | **Rejected** at provider configuration time.               |
 
 An older-than-minimum Lima is an **error**. A newer-than-tested Lima is a
 **warning** only, so upgrading Lima cannot break a working configuration.

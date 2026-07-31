@@ -1,10 +1,7 @@
 BINARY      := terraform-provider-lima
-VERSION     ?= 0.1.0-dev
+VERSION     ?= 0.0.1-dev
 GOFLAGS     ?=
 LDFLAGS     := -ldflags "-s -w -X main.version=$(VERSION)"
-
-# Local plugin directory used by `make install`. Change the namespace here and
-# in main.go together if you fork this provider.
 HOSTNAME    := registry.terraform.io
 NAMESPACE   := guidoiaquinti
 NAME        := lima
