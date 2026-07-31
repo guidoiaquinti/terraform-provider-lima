@@ -1,0 +1,28 @@
+# Code owners are requested for review automatically on every pull request.
+#
+# One maintainer today, so a catch-all is honest: naming per-directory owners
+# would imply a review rota that does not exist. The specific entries below are
+# not narrower ownership — they mark the files where a wrong change is expensive
+# and silent, so that a future co-maintainer inherits the emphasis rather than
+# having to rediscover it.
+
+*                                   @guidoiaquinti
+
+# The recorded limactl contract. Everything in internal/lima is written against
+# it, and a change here that is not verified against a real Lima invalidates the
+# fake, the fixtures and the acceptance suite at once.
+/docs/development/lima-cli-contract.md  @guidoiaquinti
+/internal/testutil/                     @guidoiaquinti
+
+# Release and CI plumbing. A mistake here is not caught by any test: it either
+# ships a broken artifact or weakens the workflow permissions model.
+/.github/workflows/                 @guidoiaquinti
+/.goreleaser.yml                    @guidoiaquinti
+/terraform-registry-manifest.json   @guidoiaquinti
+
+# The documentation source. docs/ is generated from here, so a change to
+# templates/ is what actually reaches the Terraform Registry — and a pull
+# request touching docs/ without touching templates/ is almost certainly a hand
+# edit that the next `make docs` will revert.
+/templates/                         @guidoiaquinti
+/docs/                              @guidoiaquinti

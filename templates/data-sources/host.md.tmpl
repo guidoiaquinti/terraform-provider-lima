@@ -1,0 +1,85 @@
+---
+page_title: "lima_host Data Source - terraform-provider-lima"
+description: |-
+  Reports the capabilities of the local Lima installation.
+---
+<!--
+  GENERATED FILE - DO NOT EDIT.
+
+  Source: templates/data-sources/host.md.tmpl
+  Regenerate: make docs      (make docs-check fails if this file disagrees)
+
+  The attribute reference comes from the provider schema, so it cannot drift
+  from the code. The narrative around it is hand-written in the template.
+-->
+
+# lima_host (Data Source)
+
+Reports the capabilities of the local Lima installation, as detected by
+`limactl info`.
+
+Only values Lima actually reports are exposed. Nothing is inferred from the
+host platform, and capabilities that cannot be determined reliably are omitted
+rather than guessed.
+
+## Example usage
+
+```hcl
+data "lima_host" "current" {}
+
+output "lima_version" {
+  value = data.lima_host.current.lima_version
+}
+
+output "available_backends" {
+  value = data.lima_host.current.vm_types
+}
+```
+
+Choosing a backend based on what the host actually supports:
+
+```hcl
+data "lima_host" "current" {}
+
+resource "lima_instance" "dev" {
+  name     = "dev"
+  template = "template:ubuntu"
+
+  # Prefer the native macOS backend when Lima reports it.
+  vm_type = contains(data.lima_host.current.vm_types, "vz") ? "vz" : "qemu"
+}
+```
+
+Guarding against a missing template:
+
+```hcl
+data "lima_host" "current" {}
+
+resource "lima_instance" "dev" {
+  name     = "dev"
+  template = "template:ubuntu"
+
+  lifecycle {
+    precondition {
+      condition     = contains(data.lima_host.current.templates, "ubuntu")
+      error_message = "The ubuntu template is not available in this Lima installation."
+    }
+  }
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Notes on omitted attributes
+
+The following were considered and deliberately **not** exposed, because Lima
+provides no reliable way to detect them:
+
+- **Snapshot support.** `limactl snapshot` exists, but whether it works depends
+  on the VM backend and disk format of a specific instance, not on the host.
+- **Disk support.** Same reasoning.
+- **Default instance name.** Lima has no host-level notion of one; `default` is
+  simply the name `limactl start` uses when given no argument.
+
+Guessing these would produce a value that is wrong in some configurations,
+which is worse than not offering it.

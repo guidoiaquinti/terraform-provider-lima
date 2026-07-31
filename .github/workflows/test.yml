@@ -1,0 +1,275 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Unit tests create no VMs, so they run anywhere Go runs.
+        # macos-latest is arm64; ubuntu-latest is amd64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check formatting
+        run: |
+          out="$(gofmt -l -s .)"
+          if [ -n "$out" ]; then
+            echo "these files need gofmt -s:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -timeout 10m
+
+      - name: Test with the race detector
+        run: go test -race ./... -timeout 15m
+
+  docs:
+    name: docs are generated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # docs/ is generated from templates/ and the schema by tfplugindocs, which
+      # is pinned as a tool dependency in go.mod. This is the gate that makes the
+      # generation real: without it, a schema description could change and the
+      # published registry documentation would keep describing the old
+      # behaviour, which is precisely the drift the templates were adopted to
+      # prevent.
+      - name: Check docs/ matches templates/ and the schema
+        run: make docs-check
+
+      # THIRD-PARTY-NOTICES.md reproduces the licence of every module linked
+      # into the shipped binary, which Apache-2.0 §4, BSD and MIT all require of
+      # a binary redistribution. It goes stale silently whenever the dependency
+      # graph changes, and the only symptom is an incomplete legal notice in a
+      # published release.
+      - name: Check THIRD-PARTY-NOTICES.md is current
+        run: make notices-check
+
+  release-dry-run:
+    name: release dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: GoReleaser derives the snapshot version from git.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # Caching is off here for the same reason the release workflow turns it
+          # off: a GitHub Actions cache is writable by any workflow run on any
+          # branch, so a job that produces release-shaped artifacts must not
+          # restore one. Nothing is published from a pull request, but this job
+          # exists precisely to be a faithful rehearsal of the release build, and
+          # a rehearsal with a different trust model is not one. zizmor flags the
+          # combination as cache poisoning.
+          cache: false
+
+      - name: Validate the GoReleaser configuration
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          version: latest
+          args: check
+
+      # --snapshot skips publishing and signing, so no GPG key is needed and
+      # nothing can be released from a pull request. It still cross-compiles
+      # every goos/goarch pair in the config.
+      - name: Build every shipped target
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          version: latest
+          args: build --snapshot --clean
+
+      - name: Confirm a binary exists for every shipped target
+        # Belt and braces: `goreleaser build` exiting zero having produced
+        # nothing would otherwise pass silently. Six targets: darwin, linux and
+        # windows on amd64 and arm64.
+        run: |
+          set -euo pipefail
+          count="$(find dist -type f -name 'terraform-provider-lima_v*' | wc -l | tr -d ' ')"
+          find dist -type f -name 'terraform-provider-lima_v*' | sort
+          if [ "$count" -ne 6 ]; then
+            echo "expected 6 binaries, found $count"
+            exit 1
+          fi
+
+  # Two different questions, deliberately split across two jobs.
+  #
+  # `compatibility` answers "does the provider work on the CLI versions the
+  # README claims", using one fixture that names the whole schema surface. The
+  # floors are the interesting entries: 1.0.0 and 1.6.0 are what the README
+  # promises, and before this job existed nothing checked them — CI pinned a
+  # single Terraform minor, so the promise was untested for four years of
+  # releases in either direction.
+  #
+  # `examples` answers "are the shipped examples valid", on current CLIs only.
+  # Examples are written for people and may use HCL newer than the provider's
+  # floor; one of them declares `required_version = ">= 1.2.0"` for exactly that
+  # reason. Conflating the two is what hid the mismatch.
+  compatibility:
+    name: compat ${{ matrix.cli }} ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cli: terraform, version: "1.0.0" }
+          - { cli: terraform, version: "1.5.7" }
+          - { cli: terraform, version: "latest" }
+          - { cli: opentofu, version: "1.6.0" }
+          - { cli: opentofu, version: "latest" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: matrix.cli == 'terraform'
+        with:
+          terraform_version: ${{ matrix.version }}
+          terraform_wrapper: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: matrix.cli == 'opentofu'
+        with:
+          tofu_version: ${{ matrix.version }}
+          tofu_wrapper: false
+
+      - name: Build the provider
+        run: go build -o terraform-provider-lima .
+
+      - name: Validate the compatibility fixture
+        env:
+          CLI: ${{ matrix.cli == 'opentofu' && 'tofu' || 'terraform' }}
+        run: |
+          set -euo pipefail
+          # Both CLIs read TF_CLI_CONFIG_FILE, and both resolve the bare
+          # "guidoiaquinti/lima" override key against their own default
+          # registry host, so one file serves both.
+          cat > /tmp/devrc <<TFRC
+          provider_installation {
+            dev_overrides {
+              "guidoiaquinti/lima" = "${GITHUB_WORKSPACE}"
+            }
+            direct {}
+          }
+          TFRC
+          export TF_CLI_CONFIG_FILE=/tmp/devrc
+          "$CLI" version
+          cd test/compat
+          "$CLI" validate -no-color
+
+  examples:
+    name: validate examples (${{ matrix.cli }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cli: [terraform, opentofu]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: matrix.cli == 'terraform'
+        with:
+          terraform_version: "latest"
+          terraform_wrapper: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: matrix.cli == 'opentofu'
+        with:
+          tofu_version: "latest"
+          tofu_wrapper: false
+
+      - name: Build the provider
+        run: go build -o terraform-provider-lima .
+
+      - name: Check HCL formatting
+        env:
+          CLI: ${{ matrix.cli == 'opentofu' && 'tofu' || 'terraform' }}
+
+        if: matrix.cli == 'terraform'
+        run: |
+          "$CLI" fmt -check -recursive ./examples
+          "$CLI" fmt -check -recursive ./test
+
+      - name: Validate every example against the built provider
+        env:
+          CLI: ${{ matrix.cli == 'opentofu' && 'tofu' || 'terraform' }}
+        run: |
+          cat > /tmp/devrc <<TFRC
+          provider_installation {
+            dev_overrides {
+              "guidoiaquinti/lima" = "${GITHUB_WORKSPACE}"
+            }
+            direct {}
+          }
+          TFRC
+          export TF_CLI_CONFIG_FILE=/tmp/devrc
+          "$CLI" version
+          status=0
+          for dir in $(find examples -name '*.tf' -exec dirname {} \; | sort -u); do
+            echo "==> $dir"
+            if ! (cd "$dir" && "$CLI" validate -no-color); then
+              status=1
+            fi
+          done
+          exit $status

@@ -1,0 +1,85 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check `docs/resources/instance.md` — several
+        behaviours that look like bugs are documented limitations of this
+        release, particularly around replacement and import.
+
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider version
+      placeholder: "0.0.1-dev"
+    validations:
+      required: true
+
+  - type: input
+    id: lima-version
+    attributes:
+      label: Lima version
+      description: "Output of `limactl --version`"
+      placeholder: "limactl version 2.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: terraform-version
+    attributes:
+      label: Terraform or OpenTofu version
+      placeholder: "Terraform v1.9.5"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Host OS and architecture
+      placeholder: "macOS 15.1, arm64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Terraform configuration
+      description: Minimal configuration that reproduces the problem. Remove any secrets.
+      render: hcl
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the full error output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug output
+      description: |
+        Output of `TF_LOG=DEBUG terraform apply`. Review it before pasting;
+        it includes host paths and configuration metadata.
+      render: text
+
+  - type: textarea
+    id: lima-check
+    attributes:
+      label: Does the equivalent limactl command work?
+      description: |
+        This provider drives `limactl`. If the same operation fails when run
+        directly, the issue probably belongs upstream in Lima.
+      render: shell

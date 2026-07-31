@@ -1,0 +1,115 @@
+{
+  "version": "2.2.0",
+  "templates": [
+    {
+      "name": "_default/mounts",
+      "location": "/opt/homebrew/share/lima/templates/_default/mounts.yaml"
+    },
+    {
+      "name": "_images/alpine-3.23",
+      "location": "/opt/homebrew/share/lima/templates/_images/alpine-3.23.yaml"
+    },
+    {
+      "name": "_images/ubuntu",
+      "location": "/opt/homebrew/share/lima/templates/_images/ubuntu.yaml"
+    },
+    {
+      "name": "alpine",
+      "location": "/opt/homebrew/share/lima/templates/alpine.yaml"
+    },
+    {
+      "name": "default",
+      "location": "/opt/homebrew/share/lima/templates/default.yaml"
+    },
+    {
+      "name": "docker",
+      "location": "/opt/homebrew/share/lima/templates/docker.yaml"
+    },
+    {
+      "name": "fedora",
+      "location": "/opt/homebrew/share/lima/templates/fedora.yaml"
+    },
+    {
+      "name": "k3s",
+      "location": "/opt/homebrew/share/lima/templates/k3s.yaml"
+    },
+    {
+      "name": "ubuntu",
+      "location": "/opt/homebrew/share/lima/templates/ubuntu.yaml"
+    }
+  ],
+  "limaHome": "/Users/alice/.lima",
+  "vmTypes": [
+    "vz",
+    "qemu",
+    "krunkit"
+  ],
+  "vmTypesEx": {
+    "krunkit": {
+      "location": "/opt/homebrew/Cellar/lima/2.2.0/libexec/lima/lima-driver-krunkit"
+    },
+    "qemu": {
+      "location": "internal"
+    },
+    "vz": {
+      "location": "internal"
+    }
+  },
+  "guestAgents": {
+    "Darwin-aarch64": {
+      "location": "/opt/homebrew/share/lima/lima-guestagent.Darwin-aarch64.gz"
+    },
+    "aarch64": {
+      "location": "/opt/homebrew/share/lima/lima-guestagent.Linux-aarch64.gz"
+    }
+  },
+  "shellEnvBlock": [
+    "BASH*",
+    "DISPLAY",
+    "DYLD_*",
+    "EUID",
+    "FPATH",
+    "GID",
+    "GROUP",
+    "HOME",
+    "HOSTNAME",
+    "LD_*",
+    "LOGNAME",
+    "OLDPWD",
+    "PATH",
+    "PWD",
+    "SHELL",
+    "SHLVL",
+    "SSH_*",
+    "TERM",
+    "TERMINFO",
+    "TMPDIR",
+    "UID",
+    "USER",
+    "XAUTHORITY",
+    "XDG_*",
+    "ZDOTDIR",
+    "ZSH*",
+    "_*"
+  ],
+  "hostOS": "darwin",
+  "hostArch": "aarch64",
+  "identityFile": "/Users/alice/.lima/_config/user",
+  "plugins": [
+    {
+      "name": "mcp",
+      "path": "/opt/homebrew/Cellar/lima/2.2.0/libexec/lima/limactl-mcp"
+    },
+    {
+      "name": "url-fedora-rawhide",
+      "path": "/opt/homebrew/Cellar/lima/2.2.0/libexec/lima/limactl-url-fedora-rawhide"
+    }
+  ],
+  "libexecPaths": [
+    "/opt/homebrew/Cellar/lima/2.2.0/libexec/lima"
+  ],
+  "sharePaths": [
+    "/opt/homebrew/share/lima",
+    "/opt/homebrew/Cellar/lima/2.2.0/share/lima"
+  ]
+}

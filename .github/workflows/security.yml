@@ -1,0 +1,114 @@
+name: security
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 05:00 UTC — an hour after the acceptance sweep, so a
+    # dependency advisory and a Lima regression do not land in the same digest.
+    - cron: "0 5 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          repo-checkout: false
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    # CodeQL is free for public repositories; on a private one it requires a
+    # GitHub Advanced Security entitlement and the job errors out. Gating on
+    # visibility means this skips cleanly today and starts working the moment
+    # the repository is made public — which it must be to publish to the
+    # Terraform Registry anyway. A missing context evaluates false, so the
+    # failure mode is "skipped", never "errored".
+    if: github.event.repository.private == false
+    permissions:
+      contents: read
+      security-events: write # uploading the SARIF results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@bce182f857edf1feab116e9795a3393d21977282 # v4
+        with:
+          languages: go
+          # security-extended adds the lower-precision security queries. Worth
+          # it here: the provider's whole job is executing a subprocess and
+          # writing files a user's configuration names, which is exactly the
+          # shape the extra queries look at.
+          queries: security-extended
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@bce182f857edf1feab116e9795a3393d21977282 # v4
+        with:
+          category: "/language:go"
+
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    # Pull requests only: the action diffs the dependency manifest between base
+    # and head, so there is nothing for it to compare on a push or a schedule.
+    # Same visibility gate as CodeQL — it needs the dependency graph, which is
+    # a GHAS feature on private repositories.
+    if: github.event_name == 'pull_request' && github.event.repository.private == false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Fail the pull request on a moderate-or-worse advisory in anything it
+          # adds. Low severity is reported but does not block: Dependabot
+          # already opens a pull request for those, and blocking on them trains
+          # people to merge past the gate.
+          fail-on-severity: moderate
+          # This provider is Apache-2.0 and ships as one statically linked
+          # binary, so a copyleft dependency is not a compatibility footnote —
+          # it changes what every user of the compiled provider is obliged to
+          # do, and it does so silently until somebody audits a release.
+          #
+          # MPL-2.0 is deliberately absent from this list: its copyleft is
+          # file-level and does not propagate to a larger work, which is why the
+          # HashiCorp plugin framework can be linked here at all.
+          deny-licenses: >-
+            GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later,
+            AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later,
+            LGPL-2.0-only, LGPL-2.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later,
+            LGPL-3.0-only, LGPL-3.0-or-later
+          comment-summary-in-pr: on-failure

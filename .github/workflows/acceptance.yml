@@ -1,0 +1,130 @@
+name: acceptance
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_pattern:
+        description: "go test -run pattern"
+        required: false
+        default: "TestAcc"
+  schedule:
+    # Weekly, Monday 04:00 UTC
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A short LIMA_HOME: Lima builds unix socket paths as
+  # <LIMA_HOME>/<name>/ssh.sock.<16 digits> and enforces UNIX_PATH_MAX=104.
+  LIMA_PROVIDER_ACC_HOME: /tmp/ltfci
+
+jobs:
+  linux-qemu:
+    name: acceptance (linux/${{ matrix.arch }}, qemu, ${{ matrix.cli }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            lima_asset: Linux-x86_64
+            cli: terraform
+          - arch: amd64
+            runner: ubuntu-24.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            lima_asset: Linux-x86_64
+            cli: opentofu
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu_packages: qemu-system-arm qemu-utils qemu-efi-aarch64
+            lima_asset: Linux-aarch64
+            cli: terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: matrix.cli == 'terraform'
+        with:
+          terraform_version: "latest"
+          terraform_wrapper: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: matrix.cli == 'opentofu'
+        with:
+          tofu_version: "latest"
+          tofu_wrapper: false
+          provider_acceptance_tests: true
+
+      - name: Install QEMU
+        env:
+          QEMU_PACKAGES: ${{ matrix.qemu_packages }}
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: this is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends $QEMU_PACKAGES
+
+      - name: Install Lima
+        env:
+          LIMA_VERSION: v2.2.0
+          LIMA_ASSET: ${{ matrix.lima_asset }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/lima.tar.gz \
+            "https://github.com/lima-vm/lima/releases/download/${LIMA_VERSION}/lima-${LIMA_VERSION#v}-${LIMA_ASSET}.tar.gz"
+          sudo tar -C /usr/local -xzf /tmp/lima.tar.gz
+          limactl --version
+
+      - name: Report host capabilities
+        run: |
+          limactl info | head -c 2000
+          echo
+          # Whether /dev/kvm is present decides between hardware acceleration
+          # and TCG emulation, which is the difference between a fast job and
+          # a slow one. Recorded so a timeout has an obvious first suspect.
+          if [ -e /dev/kvm ]; then
+            echo "KVM: present"; ls -l /dev/kvm
+          else
+            echo "KVM: absent - QEMU will fall back to software emulation"
+          fi
+
+      - name: Run acceptance tests
+        env:
+          TF_ACC: "1"
+          RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
+        run: |
+          # -count=1 defeats the build cache. Go keys a cached test result on
+          # the environment variables the test read, so a run that only flips a
+          # variable the suite never inspects can be served from cache and
+          # reported green without a VM ever being created. For a suite whose
+          # entire value is that it touched real hardware, a cached pass is
+          # worse than no run at all.
+          go test ./internal/provider/ \
+            -run "$RUN_PATTERN" \
+            -count=1 \
+            -v -timeout 80m
+
+      - name: Clean up any leftover instances and disks
+        if: always()
+        run: make sweep SWEEP_HOME=/tmp/ltfci
+
+      - name: Remove the isolated LIMA_HOME
+        if: always()
+        run: rm -rf /tmp/ltfci

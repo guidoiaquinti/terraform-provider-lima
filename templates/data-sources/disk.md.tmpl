@@ -1,0 +1,36 @@
+---
+page_title: "lima_disk Data Source - terraform-provider-lima"
+description: |-
+  Reads an existing Lima disk.
+---
+<!--
+  GENERATED FILE - DO NOT EDIT.
+
+  Source: templates/data-sources/disk.md.tmpl
+  Regenerate: make docs      (make docs-check fails if this file disagrees)
+
+  The attribute reference comes from the provider schema, so it cannot drift
+  from the code. The narrative around it is hand-written in the template.
+-->
+
+# lima_disk (Data Source)
+
+Reads an existing Lima disk. This data source never modifies the disk.
+
+## Example usage
+
+```hcl
+data "lima_disk" "data" {
+  name = "project-data"
+}
+
+output "guest_path" {
+  value = data.lima_disk.data.mount_point
+}
+
+output "free_to_destroy" {
+  value = data.lima_disk.data.in_use_by == null
+}
+```
+
+{{ .SchemaMarkdown | trimspace }}

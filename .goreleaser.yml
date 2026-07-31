@@ -1,0 +1,96 @@
+# GoReleaser configuration following the Terraform Registry's publishing
+# requirements: binaries named terraform-provider-{NAME}_v{VERSION}, zipped per
+# platform, with a GPG-signed SHA256SUMS manifest.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: terraform-provider-lima
+    main: ./
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # Only platforms that can host Lima, and only platforms CI compiles.
+    #
+    # Those two constraints used to disagree. This shipped freebsd, 386 and
+    # arm (32-bit) binaries that nothing ever built outside a release: the
+    # cross-compile matrix covered darwin and linux on amd64 and arm64, so four
+    # of the published archives were first compiled by the tag that published
+    # them. The release-dry-run job now builds this whole matrix on every pull
+    # request, and the matrix itself is narrowed to what can work:
+    #
+    #   freebsd   Lima does not support FreeBSD as a host.
+    #   386       Lima requires a 64-bit host.
+    #   arm (v7)  Likewise 32-bit.
+    #
+    # Dropping them is the honest signal: the registry then reports no
+    # compatible provider, instead of installing a binary that cannot find a
+    # working limactl. Windows is kept because Lima supports WSL2 — the provider
+    # is untested there, which the README says, but an uninstallable provider is
+    # worse than an untested one.
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      # GoReleaser's defaults already pick up LICENSE, README and CHANGELOG.
+      # THIRD-PARTY-NOTICES.md has to be named explicitly, and it is not
+      # optional: the binary statically links 26 modules under Apache-2.0, BSD
+      # and MIT, each of which requires its copyright notice to accompany a
+      # binary redistribution. Our own LICENSE satisfies our licence and none of
+      # theirs.
+      - src: THIRD-PARTY-NOTICES.md
+      - src: LICENSE
+      - src: README.md
+      - src: CHANGELOG.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  # Releases start as drafts so the changelog can be reviewed before publishing.
+  draft: true
+  prerelease: auto
+  extra_files:
+    # The Terraform Registry reads the protocol version from this file, and looks
+    # for it under exactly this name. Without it the registry assumes the older
+    # SDK protocol and every `terraform init` against the published provider
+    # fails, so it is a release asset rather than just a repository file.
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
