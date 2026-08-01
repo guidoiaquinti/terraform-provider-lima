@@ -252,7 +252,23 @@ func (s *Service) startLocked(ctx context.Context, name string) error {
 
 	tflog.Debug(ctx, "starting Lima instance", map[string]any{"name": name})
 	if err := s.client.Start(ctx, name); err != nil {
-		return err
+		// Lima exits non-zero when the VM came up but it could not reach the
+		// guest agent, reporting `fatal: degraded`. The instance is running and
+		// usable; what may not work is port forwarding and file sharing. Ask
+		// Lima what the instance is actually doing rather than trusting the
+		// exit code, and treat a running instance as started.
+		//
+		// Reporting a failure here would be actively misleading: Terraform
+		// would say the instance could not be created while it is running.
+		inst, inspectErr := s.client.Inspect(ctx, name)
+		if inspectErr != nil || inst.Status() != StatusRunning {
+			return err
+		}
+		tflog.Warn(ctx, "Lima reported a degraded start; the instance is running but some of its "+
+			"functionality (port forwarding, file sharing) may be unavailable", map[string]any{
+			"name":  name,
+			"error": err.Error(),
+		})
 	}
 	return s.waitForStatus(ctx, name, "start", StatusRunning)
 }

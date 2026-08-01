@@ -1,6 +1,9 @@
 // Copyright 2026 Guido Iaquinti
 // SPDX-License-Identifier: Apache-2.0
 
+// Package main is the provider's plugin entry point. Terraform executes this
+// binary and speaks the plugin protocol to it over a handshake on stdio; all of
+// the provider's behaviour lives in internal/provider.
 package main
 
 import (

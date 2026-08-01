@@ -1,8 +1,19 @@
 name: security
+
 on:
   push:
     branches: [main]
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .github/workflows/security.yml
   pull_request:
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .github/workflows/security.yml
   workflow_dispatch:
   schedule:
     # Weekly, Monday 05:00 UTC — an hour after the acceptance sweep, so a
@@ -18,7 +29,7 @@ concurrency:
 jobs:
   govulncheck:
     name: govulncheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -39,14 +50,7 @@ jobs:
 
   codeql:
     name: CodeQL
-    runs-on: ubuntu-latest
-    # CodeQL is free for public repositories; on a private one it requires a
-    # GitHub Advanced Security entitlement and the job errors out. Gating on
-    # visibility means this skips cleanly today and starts working the moment
-    # the repository is made public — which it must be to publish to the
-    # Terraform Registry anyway. A missing context evaluates false, so the
-    # failure mode is "skipped", never "errored".
-    if: github.event.repository.private == false
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write # uploading the SARIF results
@@ -77,12 +81,10 @@ jobs:
 
   dependency-review:
     name: dependency review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Pull requests only: the action diffs the dependency manifest between base
     # and head, so there is nothing for it to compare on a push or a schedule.
-    # Same visibility gate as CodeQL — it needs the dependency graph, which is
-    # a GHAS feature on private repositories.
-    if: github.event_name == 'pull_request' && github.event.repository.private == false
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
     steps:

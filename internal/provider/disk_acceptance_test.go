@@ -32,6 +32,10 @@ func accDiskClient(t *testing.T) lima.DiskClient {
 // destroyDisk removes a disk during cleanup, tolerating absence.
 func destroyDisk(t *testing.T, name string) {
 	t.Helper()
+	if !accSetUp() {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -79,6 +83,7 @@ func TestAccDiskBasic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkDiskAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -128,6 +133,7 @@ resource "lima_disk" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkDiskAbsent(t, name),
 		Steps: []resource.TestStep{
 			{Config: config("1GiB"), Check: checkDiskSize(t, name, 1<<30)},
@@ -171,6 +177,7 @@ func TestAccDiskImport(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkDiskAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -215,6 +222,7 @@ func TestAccDiskDuplicateNameSuggestsImport(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		Steps: []resource.TestStep{
 			{
 				Config: accProviderConfig() + fmt.Sprintf(`
@@ -236,6 +244,7 @@ func TestAccDiskDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkDiskAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -301,6 +310,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy: resource.ComposeAggregateTestCheckFunc(
 			checkLimaAbsent(t, instName),
 			checkDiskAbsent(t, diskName),

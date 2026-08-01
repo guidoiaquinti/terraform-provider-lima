@@ -266,8 +266,8 @@ which parses the shipped HCL and checks each name against the real schema.
 
 Unit tests need no VM and run on any platform.
 
-**Every CI job runs on a free runner class.** `ubuntu-24.04` and
-`ubuntu-24.04-arm` are both free for public repositories, as are the standard
+**Every CI job runs on a free runner class.** `ubuntu-26.04` and
+`ubuntu-26.04-arm` are both free for public repositories, as are the standard
 `macos-latest` runners the unit tests use.
 
 OpenTofu gets one acceptance job, on Linux amd64, rather than a copy of every
@@ -279,9 +279,9 @@ request.
 Acceptance tests **do** run on GitHub-hosted runners. The upstream Lima project
 runs its own VM integration tests there, which is the evidence this is modelled
 on — from a recent `lima-vm/lima` CI run, `Integration tests (QEMU, Linux host)
-(alpine.yaml)` took **7.7 minutes on a standard `ubuntu-24.04` runner**. So the
-Linux + QEMU job runs on every pull request, on both `ubuntu-24.04` and
-`ubuntu-24.04-arm` — both are free runner classes for public repositories. The
+(alpine.yaml)` took **7.7 minutes on a standard `ubuntu-26.04` runner**. So the
+Linux + QEMU job runs on every pull request, on both `ubuntu-26.04` and
+`ubuntu-26.04-arm` — both are free runner classes for public repositories. The
 two Linux jobs differ in more than host CPU: a different QEMU system emulator,
 a different EFI firmware package, and a different guest image per template.
 

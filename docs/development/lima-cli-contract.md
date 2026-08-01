@@ -400,6 +400,38 @@ Start is **synchronous** — it returns only once the instance is running. The
 provider still polls status afterwards to confirm, because a synchronous exit
 code alone does not tell us the final observable state.
 
+### 7.1 A non-zero exit does not mean the instance is not running
+
+Observed repeatedly on loaded CI runners: `limactl start` brings the VM up,
+reports `The final requirement 1 of 1 is satisfied`, then fails to forward the
+guest agent socket over SSH and exits **1**:
+
+```text
+error: [guest agent does not seem to be running; port forwards will not work]
+warning: DEGRADED. The VM seems running, but file sharing and port forwarding
+         may not work.
+fatal: degraded, status={Running:true Degraded:true Exiting:false ...}
+```
+
+Note `Running:true` alongside the non-zero exit. The instance exists, is
+running, and is usable — only port forwarding and file sharing are in doubt.
+
+The provider therefore treats the exit code as advisory for `start`: on failure
+it inspects the instance, and if Lima reports it running, the start is accepted
+and a warning is logged rather than the apply failing. Reporting an error would
+tell the user their instance could not be created while it is demonstrably
+running. A start that leaves the instance in any other state is still an error.
+
+### 7.2 The wait before giving up is Lima's, and is not configurable
+
+`pkg/hostagent/requirements.go` retries each requirement with function-local
+constants `retries = 200` and `sleepDuration = 3 * time.Second` — 600s, with no
+environment variable or flag to shorten it. `limactl start --timeout` bounds the
+CLI's own wait and defaults to `DefaultWatchHostAgentEventsTimeout = 10 *
+time.Minute`; the provider does not pass it, so that default applies. Both
+limits are ten minutes, and neither is ours: a VM that never gets to `ssh`
+occupies a create for ten minutes before failing.
+
 ## 8. Stopping — `limactl stop`
 
 ```text

@@ -139,7 +139,15 @@ type Scripted struct {
 	Delay time.Duration
 	// Times limits how many invocations this applies to; 0 means unlimited.
 	Times int
-	used  int
+	// Then runs after the overridden result is chosen and before it is
+	// returned, with no lock held, so a script can still change state.
+	//
+	// Needed because a scripted result otherwise replaces the simulation
+	// entirely, which cannot express a command that did its work and then
+	// exited non-zero. `limactl start` does exactly that when the VM comes up
+	// but Lima reports DEGRADED: the instance is running, the exit code is 1.
+	Then func(*FakeLimactl)
+	used int
 }
 
 // TemplateImages maps a template reference to the image URLs it resolves to,
@@ -604,6 +612,9 @@ func (f *FakeLimactl) Run(ctx context.Context, binary string, args []string, env
 			case <-ctx.Done():
 				return "", "", 0, ctx.Err()
 			}
+		}
+		if s.Then != nil {
+			s.Then(f)
 		}
 		if s.Err != nil {
 			return s.Stdout, s.Stderr, 0, s.Err

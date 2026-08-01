@@ -1,11 +1,16 @@
 name: GitHub workflows
 
 on:
-  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - .github/workflows/**
       - .github/actionlint.yaml
+  pull_request:
+    paths:
+      - .github/workflows/**
+      - .github/actionlint.yaml
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,7 +22,7 @@ permissions:
 jobs:
   actionlint:
     name: actionlint
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
 
     steps:
@@ -48,7 +53,7 @@ jobs:
 
   zizmor:
     name: zizmor
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
 
     steps:
