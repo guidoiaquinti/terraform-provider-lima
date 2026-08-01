@@ -3,7 +3,21 @@ name: lint
 on:
   push:
     branches: [main]
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .golangci.yml
+      - scripts/**
+      - .github/workflows/lint.yml
   pull_request:
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .golangci.yml
+      - scripts/**
+      - .github/workflows/lint.yml
   workflow_dispatch:
 
 permissions:
@@ -16,7 +30,7 @@ concurrency:
 jobs:
   golangci-lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,13 +43,13 @@ jobs:
 
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: latest
+          version: v2.12.2
           verify: true
           args: --timeout=5m
 
   shellcheck:
     name: shellcheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

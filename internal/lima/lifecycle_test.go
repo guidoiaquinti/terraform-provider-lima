@@ -188,6 +188,62 @@ func TestServiceCreateStartFailureLeavesInstance(t *testing.T) {
 	}
 }
 
+// Lima exits non-zero when a VM comes up but it cannot reach the guest agent,
+// reporting `fatal: degraded, status={Running:true Degraded:true ...}` — the
+// instance is running and usable, only its port forwards and file sharing may
+// not be. Failing the apply for that is wrong twice over: Terraform reports
+// "Unable to create Lima instance" for an instance that demonstrably exists and
+// runs, and the user is left to reconcile state by hand.
+//
+// Observed repeatedly on CI runners under load; see the acceptance workflow.
+func TestServiceStartAcceptsARunningButDegradedInstance(t *testing.T) {
+	t.Parallel()
+
+	fake := testutil.NewFakeLimactl()
+	fake.Seed(testutil.FakeInstance{Name: "dev", Status: "Stopped"})
+	// The VM comes up, then limactl exits 1 having declared it degraded.
+	fake.Script(testutil.Scripted{
+		Command:  "start",
+		Name:     "dev",
+		ExitCode: 1,
+		Stderr:   "fatal: degraded, status={Running:true Degraded:true Errors:[guest agent does not seem to be running; port forwards will not work]}",
+		Then: func(f *testutil.FakeLimactl) {
+			f.Seed(testutil.FakeInstance{Name: "dev", Status: "Running"})
+		},
+	})
+	svc := newService(t, fake)
+
+	if err := svc.EnsureRunning(context.Background(), "dev"); err != nil {
+		t.Fatalf("EnsureRunning on a running-but-degraded instance: %v", err)
+	}
+	if inst, _ := fake.Get("dev"); inst.Status != "Running" {
+		t.Errorf("final status = %q, want Running", inst.Status)
+	}
+}
+
+// The converse, so the fix cannot degenerate into ignoring start failures: when
+// the instance is not running, a non-zero exit is still a failure.
+func TestServiceStartStillFailsWhenTheInstanceIsNotRunning(t *testing.T) {
+	t.Parallel()
+
+	fake := testutil.NewFakeLimactl()
+	fake.Seed(testutil.FakeInstance{Name: "dev", Status: "Stopped"})
+	fake.Script(testutil.Scripted{
+		Command:  "start",
+		Name:     "dev",
+		ExitCode: 1,
+		Stderr:   "fatal: exiting, status={Running:false Degraded:false Exiting:true}",
+	})
+	svc := newService(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := svc.EnsureRunning(ctx, "dev"); err == nil {
+		t.Fatal("EnsureRunning succeeded for an instance that never started, want an error")
+	}
+}
+
 func TestServiceEnsureRunning(t *testing.T) {
 	t.Parallel()
 

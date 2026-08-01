@@ -55,6 +55,19 @@ const (
 // once and torn down by TestMain.
 var accHome string
 
+// accSetUp reports whether TestMain prepared an acceptance run, which it only
+// does when TF_ACC is set.
+//
+// Cleanup functions must consult this. Every acceptance test registers its
+// `t.Cleanup` before calling resource.Test, and resource.Test is what applies
+// the TF_ACC gate — so on a machine running plain `go test ./...` the test
+// skips but its cleanup still runs. Without this check the cleanup builds a
+// client, fails to find limactl on PATH, and calls t.Fatalf, turning every
+// skipped acceptance test into a failure on the unit-test runners.
+func accSetUp() bool {
+	return accHome != ""
+}
+
 // skipUnlessAcc skips a test that drives Lima directly rather than through
 // resource.Test, which applies the TF_ACC gate itself.
 func skipUnlessAcc(t *testing.T) {
@@ -159,11 +172,91 @@ func accClient(t *testing.T) lima.Client {
 	return c
 }
 
+// hostagentLogTail is how much of each log to reproduce. Enough for a QEMU
+// startup failure, which is always at the end, without burying the test output.
+const hostagentLogTail = 4000
+
+// accDumpLogsOnError returns an ErrorCheck that reproduces Lima's own logs
+// whenever a test step fails, passing the error through untouched.
+//
+// The timing is the whole point. When a VM fails to boot, the error Terraform
+// surfaces says only `Driver stopped due to error: exit status 1` and points at
+// `ha.stderr.log` for the reason — but that file lives inside the instance
+// directory, and `resource.Test` destroys the instance in a deferred call
+// before it returns, which deletes the directory. Anything registered with
+// `t.Cleanup` therefore runs strictly after the evidence is gone; that is
+// exactly why the first attempt at this dumped nothing. ErrorCheck is called
+// from inside the step loop, at the moment of failure, while the files still
+// exist.
+//
+// Every instance directory is dumped rather than one named instance, so a
+// single uniform line serves every test case and nothing is missed when a test
+// creates more than one VM.
+func accDumpLogsOnError(t *testing.T) resource.ErrorCheckFunc {
+	return func(err error) error {
+		t.Helper()
+		if accSetUp() {
+			dirs, globErr := filepath.Glob(filepath.Join(accHome, "*"))
+			if globErr == nil {
+				for _, dir := range dirs {
+					dumpHostagentLogs(t, dir)
+				}
+			}
+		}
+		// Returned unchanged: this hook is for visibility, and must never
+		// change which errors a test treats as failures.
+		return err
+	}
+}
+
+// dumpHostagentLogs reproduces Lima's own logs for one instance directory in
+// the test output.
+func dumpHostagentLogs(t *testing.T, dir string) {
+	t.Helper()
+
+	paths := []string{
+		filepath.Join(dir, "ha.stderr.log"),
+		filepath.Join(dir, "ha.stdout.log"),
+	}
+	// The serial logs are where the guest kernel would report a panic, and they
+	// are named per device, so glob rather than guess.
+	if serial, err := filepath.Glob(filepath.Join(dir, "serial*.log")); err == nil {
+		paths = append(paths, serial...)
+	}
+
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			// Absence is normal: a test that never started a VM has no
+			// hostagent logs, and cleanup runs for those too.
+			continue
+		}
+		if len(body) == 0 {
+			continue
+		}
+		if len(body) > hostagentLogTail {
+			body = body[len(body)-hostagentLogTail:]
+		}
+		t.Logf("--- tail of %s ---\n%s", path, body)
+	}
+}
+
 // destroyInstance removes an instance regardless of protection, for cleanup
 // after a failed test. It is deliberately tolerant: cleanup must never mask
 // the original failure.
 func destroyInstance(t *testing.T, name string) {
 	t.Helper()
+	if !accSetUp() {
+		return
+	}
+
+	// A last resort for failures that never reach ErrorCheck — a `t.Fatalf` in a
+	// PreConfig, say — where the directory may still be present. Silent when it
+	// is not, which is the normal case for a failed test step.
+	if t.Failed() {
+		dumpHostagentLogs(t, filepath.Join(accHome, name))
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -237,6 +330,7 @@ func TestAccInstanceBasic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -288,6 +382,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -336,6 +431,7 @@ func TestAccInstanceImport(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -437,6 +533,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -487,6 +584,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{Config: config},
@@ -536,6 +634,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{Config: config},
@@ -582,6 +681,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -681,6 +781,7 @@ func TestAccInstanceDuplicateNameSuggestsImport(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		Steps: []resource.TestStep{
 			{
 				Config: accProviderConfig() + fmt.Sprintf(`
@@ -722,6 +823,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -764,6 +866,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -830,6 +933,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -879,6 +983,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{Config: config("8GiB")},
@@ -909,6 +1014,7 @@ func TestAccInstanceResizeCombinedWithStop(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -948,6 +1054,7 @@ func TestAccInstanceDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -991,6 +1098,7 @@ func TestAccInstancesDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -1026,6 +1134,7 @@ func TestAccHostDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		Steps: []resource.TestStep{
 			{
 				Config: accProviderConfig() + `
@@ -1053,6 +1162,7 @@ func TestAccInstanceCustomHomeIsIsolated(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -1119,6 +1229,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{
@@ -1225,6 +1336,7 @@ resource "lima_instance" %q {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		Steps: []resource.TestStep{
 			{
 				// Start the "edited" instance from one configuration...
@@ -1322,6 +1434,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{Config: config},
@@ -1396,6 +1509,7 @@ resource "lima_instance" "test" {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
 		CheckDestroy:             checkLimaAbsent(t, name),
 		Steps: []resource.TestStep{
 			{

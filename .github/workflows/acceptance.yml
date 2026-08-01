@@ -1,8 +1,21 @@
 name: acceptance
+
 on:
-  pull_request:
   push:
     branches: [main]
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/acceptance.yml
+  pull_request:
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/acceptance.yml
   workflow_dispatch:
     inputs:
       run_pattern:
@@ -33,22 +46,46 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # amd64 only, which is what Lima's own CI does. Its test.yml runs QEMU
+        # integration tests on ubuntu-26.04, Intel macOS and Windows, and has no
+        # arm64 Linux runner anywhere — the project with the strongest incentive
+        # to test aarch64 only does so where the host is aarch64 with hardware
+        # acceleration.
+        #
+        # An arm64 leg was tried here and abandoned on evidence. Hosted arm64
+        # runners expose no /dev/kvm, so it emulated with TCG, and that path hit
+        # two walls in turn. First QEMU 8.2.2 — the only version 24.04 offers,
+        # updates pocket included — aborted on its own assertion,
+        # `regime_is_user: code should not be reached`, fixed upstream in
+        # 1505b651fdbd and released in v9.2.0. Moving to 26.04 (QEMU 10.2.1)
+        # cleared that, and then every boot-dependent test sat for exactly 600s
+        # waiting for `ssh` and failed: Lima's own ten-minute limit for an
+        # essential requirement, reached because emulation is simply too slow.
+        # Nothing in this repository can move either wall.
+        #
+        # arm64 is not unbuilt or untested as a result: the unit suite in
+        # test.yml runs on ubuntu-26.04-arm, and release.yml cross-compiles the
+        # arm64 binaries. What is missing is arm64 coverage of real VMs.
+        #
+        # `ipxe-qemu` is named explicitly rather than left to dependency
+        # resolution. It ships /usr/lib/ipxe/qemu/efi-virtio.rom, which QEMU
+        # loads for the virtio-net-pci device Lima always adds; without it QEMU
+        # exits before the guest starts, reporting `failed to find romfile
+        # "efi-virtio.rom"`. It is a hard dependency of qemu-system-x86 today,
+        # so amd64 gets it regardless — but it was only a `Recommends` of
+        # qemu-system-arm, which `--no-install-recommends` duly skipped, and
+        # that cost a full CI round trip to diagnose.
         include:
           - arch: amd64
-            runner: ubuntu-24.04
-            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            runner: ubuntu-26.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf ipxe-qemu
             lima_asset: Linux-x86_64
             cli: terraform
           - arch: amd64
-            runner: ubuntu-24.04
-            qemu_packages: qemu-system-x86 qemu-utils ovmf
+            runner: ubuntu-26.04
+            qemu_packages: qemu-system-x86 qemu-utils ovmf ipxe-qemu
             lima_asset: Linux-x86_64
             cli: opentofu
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            qemu_packages: qemu-system-arm qemu-utils qemu-efi-aarch64
-            lima_asset: Linux-aarch64
-            cli: terraform
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,10 +113,30 @@ jobs:
         env:
           QEMU_PACKAGES: ${{ matrix.qemu_packages }}
         run: |
+          set -euo pipefail
           sudo apt-get update
           # Deliberately unquoted: this is a space-separated package list.
           # shellcheck disable=SC2086
           sudo apt-get install -y --no-install-recommends $QEMU_PACKAGES
+
+          # Where KVM exists, /dev/kvm is root:kvm 0660 and the runner user is
+          # not in the kvm group. Adding it with usermod does not help: group
+          # membership is read at login, and every workflow step already runs in
+          # an established session. QEMU then fails to open the device and the
+          # Lima hostagent reports only `Driver stopped due to error: exit
+          # status 1`, which looks like a Lima problem rather than a permission
+          # one. Take ownership instead — this is what Lima's own CI does in
+          # hack/install-qemu.sh, for exactly this reason.
+          #
+          # Conditional because it is not universal: GitHub's hosted arm64
+          # Linux runners expose no /dev/kvm at all, so an unconditional chown
+          # fails the job before a single test runs.
+          sudo modprobe kvm || echo "no kvm module on this host"
+          if [ -e /dev/kvm ]; then
+            sudo chown "$(id -u)" /dev/kvm
+          else
+            echo "no /dev/kvm on this runner; QEMU will use software emulation"
+          fi
 
       - name: Install Lima
         env:
@@ -101,29 +158,129 @@ jobs:
           # a slow one. Recorded so a timeout has an obvious first suspect.
           if [ -e /dev/kvm ]; then
             echo "KVM: present"; ls -l /dev/kvm
+            # Present is not the same as usable, and the difference is a job
+            # that fails in seconds versus one that boots.
+            if [ -w /dev/kvm ] && [ -r /dev/kvm ]; then
+              echo "KVM: accessible to $(id -un)"
+            else
+              echo "KVM: NOT accessible to $(id -un) - QEMU will fail to start"
+            fi
           else
             echo "KVM: absent - QEMU will fall back to software emulation"
           fi
 
+      # Retried, because booting real VMs on a shared runner is not reliable
+      # enough to gate a pull request on a single attempt. Lima's own CI reaches
+      # the same conclusion and wraps its QEMU integration tests in
+      # nick-fields/retry with max_attempts: 3.
+      #
+      # The flake this absorbs is well characterised. Lima brings the VM up,
+      # reports `The final requirement 1 of 1 is satisfied`, then fails to
+      # forward the guest agent socket over SSH (`exit status 255`), declares
+      # DEGRADED and exits non-zero — so `limactl start` fails on a VM that is
+      # demonstrably running. It has hit a different test, and a different CLI,
+      # almost every run.
+      #
+      # Written as a loop rather than a third-party action deliberately: every
+      # action here is SHA-pinned and zizmor-scanned, and a retry is five lines
+      # of shell.
+      #
+      # Retrying cannot hide a real regression — a genuine failure fails all
+      # three attempts. It does hide a *rare* flake, which is the point, so the
+      # attempt count is logged to keep that visible rather than silent.
       - name: Run acceptance tests
         env:
           TF_ACC: "1"
           RUN_PATTERN: ${{ inputs.run_pattern || 'TestAcc' }}
+          ATTEMPTS: "3"
         run: |
+          set -uo pipefail
+
           # -count=1 defeats the build cache. Go keys a cached test result on
           # the environment variables the test read, so a run that only flips a
           # variable the suite never inspects can be served from cache and
           # reported green without a VM ever being created. For a suite whose
           # entire value is that it touched real hardware, a cached pass is
           # worse than no run at all.
-          go test ./internal/provider/ \
-            -run "$RUN_PATTERN" \
-            -count=1 \
-            -v -timeout 80m
+          #
+          # The per-attempt timeout is sized so that every attempt still fits
+          # inside the job's timeout-minutes.
+          attempt=1
+          pattern="$RUN_PATTERN"
+          log=/tmp/acceptance.log
+
+          while :; do
+            echo "::group::acceptance attempt ${attempt}/${ATTEMPTS} (-run '${pattern}')"
+            go test ./internal/provider/ \
+              -run "$pattern" \
+              -count=1 \
+              -v -timeout 25m 2>&1 | tee "$log"
+            status=$?
+            echo "::endgroup::"
+
+            if [ "$status" -eq 0 ]; then
+              if [ "$attempt" -gt 1 ]; then
+                echo "::warning::acceptance tests passed on attempt ${attempt} of ${ATTEMPTS}; a flake was retried"
+              fi
+              exit 0
+            fi
+
+            if [ "$attempt" -ge "$ATTEMPTS" ]; then
+              echo "acceptance tests failed ${ATTEMPTS} times; this is a real failure"
+              exit 1
+            fi
+
+            # Retry only what actually failed. A full re-run costs another eight
+            # minutes of booting VMs that already passed, three times over for a
+            # genuine failure; one flaky test costs closer to two.
+            #
+            # Top-level tests only: subtest failures are indented, and their
+            # parent is reported too, so anchoring at column 0 gets exactly the
+            # names `-run` accepts.
+            failed="$(grep -E '^--- FAIL: ' "$log" | awk '{print $3}' | sort -u | paste -sd'|' -)"
+            if [ -n "$failed" ]; then
+              pattern="^(${failed})$"
+            else
+              # No FAIL lines means the binary did not get as far as reporting
+              # them — a build error, a panic, or the -timeout being hit. There
+              # is nothing to narrow to, so repeat the whole run.
+              echo "no individual test failures parsed; retrying the full pattern"
+              pattern="$RUN_PATTERN"
+            fi
+
+            # Leftovers from the failed attempt must not meet the next one. The
+            # names are unique per run so they would not collide, but an
+            # abandoned VM still holds memory on a runner that has little to
+            # spare — which is the most likely cause of the flake being retried.
+            make sweep SWEEP_HOME=/tmp/ltfci || true
+            attempt=$((attempt + 1))
+          done
+
+      # A backstop only, and normally silent. Each test deletes its instance
+      # directory in `t.Cleanup`, so a failed test has already taken its
+      # hostagent logs with it by the time this step runs — which is why the
+      # suite itself dumps them (see `dumpHostagentLogs`). What is left for this
+      # step is the case where cleanup never ran at all: a job cancelled on
+      # timeout, or a killed test binary.
+      - name: Dump any Lima logs left behind
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for log in /tmp/ltfci/*/ha.stderr.log /tmp/ltfci/*/ha.stdout.log /tmp/ltfci/*/serial*.log; do
+            echo "::group::$log"
+            tail -c 20000 "$log"
+            echo "::endgroup::"
+          done
+        shell: bash
 
       - name: Clean up any leftover instances and disks
         if: always()
-        run: make sweep SWEEP_HOME=/tmp/ltfci
+        run: |
+          if ! command -v limactl >/dev/null; then
+            echo "limactl was never installed; nothing to sweep"
+            exit 0
+          fi
+          make sweep SWEEP_HOME=/tmp/ltfci
 
       - name: Remove the isolated LIMA_HOME
         if: always()
