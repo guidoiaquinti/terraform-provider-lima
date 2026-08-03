@@ -23,13 +23,23 @@ Manages local [Lima](https://lima-vm.io/) virtual machines declaratively.
 > **Unofficial.** Not affiliated with, endorsed by, or supported by the Lima
 > project or HashiCorp.
 
+> **Pre-1.0.** This provider is in its `0.x` line, where a **minor** bump may
+> change the schema in a breaking way — including changes that require
+> `terraform state` surgery rather than only an edit to a `.tf` file. Terraform
+> does not special-case `0.x`, so `~> 0.1` would upgrade you across such a
+> change: pin the patch range with `~> 0.1.0` as shown below. Every breaking
+> change is listed in the
+> [changelog](https://github.com/guidoiaquinti/terraform-provider-lima/blob/main/CHANGELOG.md)
+> with its migration steps.
+
 ## Example usage
 
 ```hcl
 terraform {
   required_providers {
     lima = {
-      source = "guidoiaquinti/lima"
+      source  = "guidoiaquinti/lima"
+      version = "~> 0.1.0"
     }
   }
 }
@@ -101,10 +111,10 @@ Explicit configuration always takes precedence over an environment variable.
 
 | Provider version | Lima version | Behaviour                                                 |
 | ---------------- | ------------ | --------------------------------------------------------- |
-| 0.0.1-dev        | 2.2.0        | Developed and verified against Lima 2.2.0, macOS 15 arm64. |
-| 0.0.1-dev        | 2.0 – 2.1    | Accepted, not exercised. 2.0 is the enforced minimum.      |
-| 0.0.1-dev        | > 2.2.0      | Accepted with a warning.                                   |
-| 0.0.1-dev        | < 2.0        | **Rejected** at provider configuration time.               |
+| 0.1.x            | 2.2.0        | Developed and verified against Lima 2.2.0, macOS 15 arm64. |
+| 0.1.x            | 2.0 – 2.1    | Accepted, not exercised. 2.0 is the enforced minimum.      |
+| 0.1.x            | > 2.2.0      | Accepted with a warning.                                   |
+| 0.1.x            | < 2.0        | **Rejected** at provider configuration time.               |
 
 An older-than-minimum Lima is an **error**. A newer-than-tested Lima is a
 **warning** only, so upgrading Lima cannot break a working configuration.
