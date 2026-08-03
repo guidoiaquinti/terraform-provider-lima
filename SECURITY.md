@@ -52,5 +52,7 @@ consumes, so the interesting surfaces are:
 
 ## Supported versions
 
-The provider is pre-release (`0.0.1-dev`) and has never been published, so
-there are no supported older versions. Fixes land on `main`.
+Only the **latest released minor** is supported. While the provider is pre-1.0
+there are no backports: a fix lands on `main` and ships in the next release from
+that line, so upgrading is the remedy. Older `0.x` minors receive nothing, even
+for a security fix.

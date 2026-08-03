@@ -13,7 +13,7 @@ body:
     id: provider-version
     attributes:
       label: Provider version
-      placeholder: "0.0.1-dev"
+      placeholder: "0.1.0"
     validations:
       required: true
 
