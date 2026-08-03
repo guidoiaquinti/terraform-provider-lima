@@ -6,6 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -46,6 +48,8 @@ func destroyDisk(t *testing.T, name string) {
 
 // checkDiskAbsent asserts the disk is gone from Lima.
 func checkDiskAbsent(t *testing.T, name string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -61,6 +65,8 @@ func checkDiskAbsent(t *testing.T, name string) resource.TestCheckFunc {
 
 // checkDiskSize asserts the size Lima reports, not just Terraform state.
 func checkDiskSize(t *testing.T, name string, wantBytes int64) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -262,7 +268,7 @@ data "lima_disk" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.lima_disk.test", "name", name),
 					resource.TestCheckResourceAttr("data.lima_disk.test", "size", "3GiB"),
-					resource.TestCheckResourceAttr("data.lima_disk.test", "size_bytes", fmt.Sprint(3<<30)),
+					resource.TestCheckResourceAttr("data.lima_disk.test", "size_bytes", strconv.FormatInt(3<<30, 10)),
 					resource.TestCheckResourceAttrSet("data.lima_disk.test", "format"),
 					resource.TestCheckResourceAttrSet("data.lima_disk.test", "mount_point"),
 				),
@@ -345,6 +351,8 @@ resource "lima_instance" "test" {
 }
 
 func checkInstanceHasDisk(t *testing.T, instance, disk string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -353,10 +361,8 @@ func checkInstanceHasDisk(t *testing.T, instance, disk string) resource.TestChec
 		if err != nil {
 			return fmt.Errorf("inspecting %q: %w", instance, err)
 		}
-		for _, n := range inst.Config.AttachedDiskNames() {
-			if n == disk {
-				return nil
-			}
+		if slices.Contains(inst.Config.AttachedDiskNames(), disk) {
+			return nil
 		}
 		return fmt.Errorf("instance %q does not have disk %q attached; has %v",
 			instance, disk, inst.Config.AttachedDiskNames())
@@ -364,6 +370,8 @@ func checkInstanceHasDisk(t *testing.T, instance, disk string) resource.TestChec
 }
 
 func checkInstanceHasNoDisks(t *testing.T, instance string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()

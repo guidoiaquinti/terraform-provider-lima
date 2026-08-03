@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -538,10 +539,8 @@ func (s *Service) waitForStatus(ctx context.Context, name, operation string, wan
 			if st == StatusBroken {
 				return PollResult{}, fmt.Errorf("instance %q entered the %q state during %s", name, inst.RawStatus, operation)
 			}
-			for _, w := range want {
-				if st == w {
-					return PollResult{Done: true, Observed: string(st)}, nil
-				}
+			if slices.Contains(want, st) {
+				return PollResult{Done: true, Observed: string(st)}, nil
 			}
 			return PollResult{Observed: string(st)}, nil
 		})
@@ -589,7 +588,7 @@ func joinOr(items []string) string {
 // warning string for versions newer than the tested maximum. Splitting these
 // keeps the policy in one place instead of scattering version checks through
 // resource code.
-func CheckVersion(v Version) (warning string, err error) {
+func CheckVersion(v Version) (string, error) {
 	if !v.AtLeast(MinimumVersion) {
 		return "", fmt.Errorf(
 			"detected Lima %s, which is older than the minimum supported version %s; upgrade Lima to %s or newer",
@@ -673,8 +672,8 @@ func mergeMounts(resolved []MountView, previous, desired []Mount) []Mount {
 
 	// Declared mounts first, then template-contributed ones, matching the
 	// order `limactl create` produces.
-	out := make([]Mount, len(desired))
-	copy(out, desired)
+	out := make([]Mount, 0, len(desired)+len(keep))
+	out = append(out, desired...)
 	for _, m := range keep {
 		// A location the user now declares must not also survive as an
 		// inherited entry, or it would be mounted twice.
@@ -735,8 +734,8 @@ func mergePortForwards(resolved []PortForwardView, previous, desired []PortForwa
 		}
 	}
 
-	out := make([]PortForward, len(desired))
-	copy(out, desired)
+	out := make([]PortForward, 0, len(desired)+len(keep))
+	out = append(out, desired...)
 	for _, p := range keep {
 		if indexByForward(desired, p.GuestPort, p.Proto, portForwardKey) >= 0 {
 			continue

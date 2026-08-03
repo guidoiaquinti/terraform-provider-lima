@@ -4,6 +4,7 @@
 package lima
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ var sizePattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]*)$`)
 func ParseSize(s string) (int64, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
-		return 0, fmt.Errorf("empty size")
+		return 0, errors.New("empty size")
 	}
 	m := sizePattern.FindStringSubmatch(trimmed)
 	if m == nil {
@@ -92,7 +93,7 @@ const gibiByte = 1 << 30
 // to *almost* the requested amount would show up later as permanent drift.
 func GiBFlagValue(bytes int64) (string, error) {
 	if bytes <= 0 {
-		return "", fmt.Errorf("size must be greater than zero")
+		return "", errors.New("size must be greater than zero")
 	}
 
 	gib := float64(bytes) / gibiByte
@@ -125,7 +126,7 @@ const MaxNameLength = 63
 // ValidateName checks an instance name against Lima's constraints.
 func ValidateName(name string) error {
 	if name == "" {
-		return fmt.Errorf("instance name must not be empty")
+		return errors.New("instance name must not be empty")
 	}
 	if len(name) > MaxNameLength {
 		return fmt.Errorf("instance name %q is %d characters; the maximum is %d", name, len(name), MaxNameLength)
@@ -191,7 +192,9 @@ func ValidateNameForHome(name, home string) error {
 	if total >= unixPathMax {
 		excess := total - unixPathMax + 1
 		return fmt.Errorf(
-			"instance name %q is too long for LIMA_HOME %q: Lima builds a unix socket path of %d characters but the limit is %d; shorten the instance name by %d characters or use a shorter LIMA_HOME",
+			"instance name %q is too long for LIMA_HOME %q: "+
+				"Lima builds a unix socket path of %d characters but the limit is %d; "+
+				"shorten the instance name by %d characters or use a shorter LIMA_HOME",
 			name, home, total, unixPathMax, excess)
 	}
 	return nil

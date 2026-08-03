@@ -305,9 +305,10 @@ func observedStart(current types.Bool, inst lima.Instance) types.Bool {
 		return types.BoolValue(true)
 	case lima.StatusStopped:
 		return types.BoolValue(false)
-	default:
+	case lima.StatusCreating, lima.StatusBroken, lima.StatusUnknown:
 		return current
 	}
+	return current
 }
 
 // observedSize reconciles a configured size string with the byte count Lima
@@ -520,6 +521,8 @@ func reconcileDeclaredEntries(ctx context.Context, m *instanceModel, lists decla
 	case lima.StatusCreating, lima.StatusUnknown, lima.StatusBroken:
 		// Lima has not resolved a configuration worth comparing against.
 		return diags
+	case lima.StatusRunning, lima.StatusStopped:
+		// Resolved states are safe to reconcile below.
 	}
 
 	if lists.MountsManaged {

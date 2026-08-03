@@ -5,6 +5,7 @@ package lima
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,7 +20,10 @@ import (
 // nonInteractive is passed to every mutating command. Lima defaults --tty to
 // true when stdout is a terminal, which would open $EDITOR or prompt; both
 // would hang Terraform forever.
-const nonInteractive = "--tty=false"
+const (
+	nonInteractive   = "--tty=false"
+	listBaseArgCount = 4
+)
 
 func versionArgs() []string { return []string{"--version"} }
 
@@ -31,7 +35,8 @@ func infoArgs() []string { return []string{"info"} }
 // Passing no name lists everything and never fails on absence, which is why
 // the lifecycle layer prefers it over a name-scoped call.
 func listArgs(names ...string) []string {
-	args := []string{"list", "--format", "json", "--all-fields"}
+	args := make([]string, 0, listBaseArgCount+len(names))
+	args = append(args, "list", "--format", "json", "--all-fields")
 	return append(args, names...)
 }
 
@@ -62,6 +67,7 @@ func createArgs(name, path string) []string {
 // makes that guarantee independent of how the process was spawned.
 func editArgs(name string, e EditRequest) ([]string, error) {
 	args := []string{"edit", nonInteractive}
+	baseArgCount := len(args)
 
 	if e.CPUs > 0 {
 		args = append(args, "--cpus", strconv.FormatInt(e.CPUs, 10))
@@ -108,8 +114,8 @@ func editArgs(name string, e EditRequest) ([]string, error) {
 		args = append(args, "--set", expr)
 	}
 
-	if len(args) == 2 {
-		return nil, fmt.Errorf("edit requested with no fields to change")
+	if len(args) == baseArgCount {
+		return nil, errors.New("edit requested with no fields to change")
 	}
 	return append(args, name), nil
 }
@@ -314,7 +320,7 @@ func diskListArgs() []string { return []string{"disk", "list", "--json"} }
 
 func diskCreateArgs(req CreateDiskRequest) ([]string, error) {
 	if req.SizeBytes <= 0 {
-		return nil, fmt.Errorf("disk size must be greater than zero")
+		return nil, errors.New("disk size must be greater than zero")
 	}
 	args := []string{"disk", "create", req.Name, "--size", FormatSize(req.SizeBytes)}
 	if req.Format != "" {

@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/datasource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -179,8 +180,6 @@ func instanceObservedAttributes() map[string]schema.Attribute {
 // to a single-instance lookup.
 func instanceLookupAttributes(_ context.Context, own map[string]schema.Attribute) map[string]schema.Attribute {
 	attrs := instanceObservedAttributes()
-	for name, attr := range own {
-		attrs[name] = attr
-	}
+	maps.Copy(attrs, own)
 	return attrs
 }

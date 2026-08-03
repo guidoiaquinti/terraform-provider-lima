@@ -5,6 +5,7 @@ package lima
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -384,7 +385,7 @@ func ParseHostInfo(r io.Reader) (HostInfo, error) {
 		return HostInfo{}, fmt.Errorf("parsing limactl info output: %w", err)
 	}
 	if h.Version == "" {
-		return HostInfo{}, fmt.Errorf("parsing limactl info output: missing version field")
+		return HostInfo{}, errors.New("parsing limactl info output: missing version field")
 	}
 	return h, nil
 }

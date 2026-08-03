@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -33,9 +34,7 @@ func planForCreate(h *resourceHarness, name string, extra map[string]tftypes.Val
 		"start":    tfBool(false),
 		"protect":  tfBool(false),
 	}
-	for k, v := range extra {
-		values[k] = v
-	}
+	maps.Copy(values, extra)
 	return h.value(values)
 }
 

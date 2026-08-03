@@ -14,7 +14,7 @@ package lima
 //
 // known is false when the document is not a YAML mapping, in which case the
 // caller should stay quiet rather than guess.
-func PlainMode(doc string) (plain, known bool) {
+func PlainMode(doc string) (bool, bool) {
 	m, err := parseMapping(doc, "config")
 	if err != nil {
 		return false, false

@@ -21,10 +21,8 @@ func TestKeyedMutexSerializesSameKey(t *testing.T) {
 	var concurrent, maxConcurrent int32
 	var wg sync.WaitGroup
 
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			unlock, err := m.Lock(ctx, InstanceKey("dev"))
 			if err != nil {
 				t.Errorf("Lock returned error: %v", err)
@@ -41,7 +39,7 @@ func TestKeyedMutexSerializesSameKey(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 			atomic.AddInt32(&concurrent, -1)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -211,7 +209,7 @@ func TestKeyedMutexDoesNotLeakEntries(t *testing.T) {
 	m := NewKeyedMutex()
 	ctx := context.Background()
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		unlock, err := m.Lock(ctx, InstanceKey("dev"))
 		if err != nil {
 			t.Fatalf("Lock: %v", err)

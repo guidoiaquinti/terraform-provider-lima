@@ -222,7 +222,7 @@ func TestRenderMountOrderIsStable(t *testing.T) {
 
 	// Rendering repeatedly must be byte-identical, and the author's order
 	// must be preserved rather than sorted.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		again, err := Render(RenderRequest{Typed: cfg.Clone()})
 		if err != nil {
 			t.Fatalf("Render returned error: %v", err)
@@ -253,7 +253,7 @@ func TestRenderPortForwardOrderIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		again, err := Render(RenderRequest{Typed: cfg.Clone()})
 		if err != nil {
 			t.Fatalf("Render returned error: %v", err)
@@ -334,9 +334,14 @@ func TestRenderScalarTypesArePreserved(t *testing.T) {
 	if v, ok := param["Enable"].(string); !ok || v != "yes" {
 		t.Errorf("Enable = %#v, want string \"yes\"", param["Enable"])
 	}
-	if v, ok := param["Count"].(uint64); ok && v == 3 { //nolint:revive // either int width is fine
-		// ok
-	} else if v, ok := param["Count"].(int); !ok || v != 3 {
+	countIsThree := false
+	if v, ok := param["Count"].(uint64); ok && v == 3 {
+		countIsThree = true
+	}
+	if v, ok := param["Count"].(int); ok && v == 3 {
+		countIsThree = true
+	}
+	if !countIsThree {
 		t.Errorf("Count = %#v, want integer 3", param["Count"])
 	}
 	if v, ok := param["Flag"].(bool); !ok || !v {

@@ -17,7 +17,7 @@ import (
 
 // runStringValidator exercises a validator and reports whether it produced
 // errors and warnings.
-func runStringValidator(v validator.String, value types.String) (errs, warns int) {
+func runStringValidator(v validator.String, value types.String) (int, int) {
 	resp := &validator.StringResponse{}
 	v.ValidateString(context.Background(), validator.StringRequest{
 		Path:        path.Root("test"),

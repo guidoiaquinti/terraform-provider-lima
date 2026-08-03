@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -493,14 +494,14 @@ func TestFormatCommandError(t *testing.T) {
 func TestFormatCommandErrorPlainError(t *testing.T) {
 	t.Parallel()
 
-	if got := formatCommandError(errPlain{}); got != "plain failure" {
+	if got := formatCommandError(plainError{}); got != "plain failure" {
 		t.Errorf("formatCommandError = %q, want the plain error text", got)
 	}
 }
 
-type errPlain struct{}
+type plainError struct{}
 
-func (errPlain) Error() string { return "plain failure" }
+func (plainError) Error() string { return "plain failure" }
 
 // nullString and knownString build framework values for table tests.
 func nullString() types.String          { return types.StringNull() }
@@ -633,12 +634,7 @@ func hasRequiresReplace(attr schema.Attribute) bool {
 	default:
 		return false
 	}
-	for _, m := range modifiers {
-		if isRequiresReplace(m) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(modifiers, isRequiresReplace)
 }
 
 // isRequiresReplace identifies a replacement-forcing plan modifier by type

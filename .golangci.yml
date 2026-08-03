@@ -3,90 +3,98 @@ version: "2"
 run:
   timeout: 5m
   tests: true
+  modules-download-mode: readonly
 
 linters:
-  default: standard
-  enable:
-    - bodyclose
-    - copyloopvar
-    - durationcheck
-    - errorlint
-    - goconst
-    - gocritic
-    - misspell
-    - nilerr
-    - noctx
-    - predeclared
-    - revive
-    - unconvert
-    - unparam
-    - wastedassign
-    - whitespace
+  default: all
+  disable:
+    # These inspect frameworks or protocols the provider does not use. Leaving
+    # them enabled adds analysis time without protecting reachable code.
+    - arangolint
+    - clickhouselint
+    - ginkgolinter
+    - loggercheck
+    - promlinter
+    - protogetter
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - testifylint
+    - unqueryvet
+    - zerologlint
 
-  settings:
-    errcheck:
-      # Cleanup paths deliberately ignore errors; they must never mask the
-      # original failure.
-      exclude-functions:
-        - (*os.File).Close
-        - os.Remove
-    goconst:
-      min-len: 4
-      min-occurrences: 4
-      # Terraform attribute names and limactl subcommand tokens are repeated
-      # by design: each occurrence is a distinct schema key or argument
-      # position. Hoisting them into constants would obscure the schema and
-      # break the one-to-one mapping with the documented CLI contract.
-      #
-      # Note that the `_test.go` exclusion below suppresses *reports* in test
-      # files but not the counting, so adding tests that name a schema key can
-      # push a production occurrence over the threshold. That is what added
-      # `default_timeout` and the disk formats here; both are schema vocabulary,
-      # not incidental duplication.
-      #
-      # A list of patterns, not one string: the schema requires an array, and
-      # `golangci-lint config verify` rejects the string form even though `run`
-      # happens to accept it. The lint target verifies the config first so that
-      # cannot go unnoticed again.
-      ignore-string-values:
-        # Provider and resource schema attribute names.
-        - "^(binary|home|name_prefix|name|config|timeouts|default_timeout)$"
-        - "^(vm_type|arch|cpus|memory|disk|size|format|template|protect|start)$"
-        - "^(status|raw_status|hostname|dir|protected|mount_point|in_use_by)$"
-        - "^(ssh_[a-z_]+|lima_version)$"
-        # limactl subcommands and flags, which mirror the documented CLI
-        # contract one-to-one.
-        - "^(info|create|edit|start|stop|delete|protect|unprotect|list|validate)$"
-        - "^(limactl|lima|--size|--format)$"
-        # Values Lima itself reports or accepts.
-        - "^(running|stopped|system|user|aarch64|x86_64|qcow2|raw|data)$"
-    revive:
-      rules:
-        - name: exported
-          disabled: false
-        - name: package-comments
-          disabled: false
+    # Superseded linters. Their replacements remain enabled unless listed in
+    # the policy section below.
+    - gomodguard
+    - wsl
+
+    # Deliberate project policy. These rules either conflict with idiomatic Go
+    # and Terraform framework APIs, duplicate a stronger enabled check, or
+    # turn established formatting preferences into low-signal churn.
+    - cyclop
+    - depguard
+    - dupl
+    - err113
+    - exhaustruct
+    - funcorder
+    - funlen
+    - gocognit
+    - goconst
+    - gocyclo
+    - interfacebloat
+    - ireturn
+    - lll
+    - maintidx
+    - mnd
+    - nlreturn
+    - noinlineerr
+    - paralleltest
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - wsl_v5
 
   exclusions:
     rules:
-      # Test helpers legitimately return unparameterised values and use long
-      # literal fixtures.
+      # Test helpers legitimately return unparameterised values, use long
+      # literal fixtures, and keep shared harness state.
       - path: _test\.go
         linters:
           - goconst
+          - gochecknoglobals
           - unparam
       # The fake limactl mirrors Lima's own command surface, so its switch is
       # necessarily long.
       - path: internal/testutil/
         linters:
+          - gochecknoglobals
           - gocritic
           - unparam
+      # These package variables are immutable lookup tables, supported-value
+      # vocabularies, or documented defaults. New production globals remain
+      # findings unless deliberately added to this allowlist.
+      - text: ^(redactedEnvKeys|diskInUseMarkers|diskExistsMarkers|diskShrinkMarkers|notFoundMarkers|protectedMarkers|alreadyExistsMarkers|AllStatuses|rawStatusMap|DefaultTimeouts|sizeUnits|KnownVMTypes|KnownArches|KnownProvisionModes|MinimumVersion|MaxTestedVersion) is a global variable$
+        linters:
+          - gochecknoglobals
+      # Tests intentionally exercise variable fixture paths and executable
+      # scripts. Keep every other gosec rule active in tests.
+      - path: _test\.go
+        text: "G(301|304|306|703):"
+        linters:
+          - gosec
+      # The reusable fake limactl must be executable by the test process.
+      - path: internal/testutil/
+        text: "G306:"
+        linters:
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
 formatters:
   enable:
     - gofmt
     - goimports
-  settings:
-    goimports:
-      local-prefixes:
-        - github.com/guidoiaquinti/terraform-provider-lima

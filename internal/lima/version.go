@@ -5,6 +5,7 @@ package lima
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -84,7 +85,7 @@ var versionPattern = regexp.MustCompile(`(?m)v?(\d+)\.(\d+)(?:\.(\d+))?([0-9A-Za
 func ParseVersion(s string) (Version, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
-		return Version{}, fmt.Errorf("empty version output")
+		return Version{}, errors.New("empty version output")
 	}
 	// Only consider the first line; limactl may log warnings afterwards.
 	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {

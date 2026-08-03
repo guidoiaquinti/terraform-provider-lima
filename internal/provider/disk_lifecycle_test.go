@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -26,9 +27,7 @@ func planForDisk(h *resourceHarness, name, size string, extra map[string]tftypes
 		"name": tfString(name),
 		"size": tfString(size),
 	}
-	for k, v := range extra {
-		values[k] = v
-	}
+	maps.Copy(values, extra)
 	return h.value(values)
 }
 
@@ -220,15 +219,20 @@ func TestDiskImportRecordsWhatLimaReports(t *testing.T) {
 func TestDiskImportRejectsUnknownAndEmptyIDs(t *testing.T) {
 	t.Parallel()
 
-	fake := testutil.NewFakeLimactl()
-	h := newResourceHarness(t, fake, diskResourceCtor)
-
 	t.Run("unknown name", func(t *testing.T) {
+		t.Parallel()
+
+		fake := testutil.NewFakeLimactl()
+		h := newResourceHarness(t, fake, diskResourceCtor)
 		_, diags := h.importState("nope")
 		diags.requireError(t, "not found")
 	})
 
 	t.Run("empty id", func(t *testing.T) {
+		t.Parallel()
+
+		fake := testutil.NewFakeLimactl()
+		h := newResourceHarness(t, fake, diskResourceCtor)
 		_, diags := h.importState("  ")
 		diags.requireError(t, "import ID")
 	})
@@ -249,16 +253,21 @@ func TestDiskValidateConfigRejectsAnUnparseableSize(t *testing.T) {
 func TestDiskValidateConfigAcceptsAValidSizeAndAnAbsentOne(t *testing.T) {
 	t.Parallel()
 
-	fake := testutil.NewFakeLimactl()
-	h := newResourceHarness(t, fake, diskResourceCtor)
-
 	t.Run("valid size", func(t *testing.T) {
+		t.Parallel()
+
+		fake := testutil.NewFakeLimactl()
+		h := newResourceHarness(t, fake, diskResourceCtor)
 		h.validateConfig(planForDisk(h, testDiskName, "10GiB", nil)).requireNoError(t)
 	})
 
 	// An unknown size — one coming from a variable or another resource — says
 	// nothing about validity, so validation must skip rather than guess.
 	t.Run("unknown size", func(t *testing.T) {
+		t.Parallel()
+
+		fake := testutil.NewFakeLimactl()
+		h := newResourceHarness(t, fake, diskResourceCtor)
 		config := h.value(map[string]tftypes.Value{
 			"name": tfString(testDiskName),
 			"size": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
