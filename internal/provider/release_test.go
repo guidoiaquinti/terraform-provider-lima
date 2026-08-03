@@ -45,8 +45,10 @@ func TestRegistryManifestDeclaresProtocolSix(t *testing.T) {
 }
 
 // GoReleaser has to publish the manifest as a release asset under the name the
-// registry looks for. Having the file in the repository is not enough.
-func TestGoreleaserPublishesTheRegistryManifest(t *testing.T) {
+// registry looks for and include that published name in SHA256SUMS. Having the
+// file in the repository or uploading it without a checksum is not enough: the
+// registry rejects the whole version when any release asset is unchecksummed.
+func TestGoreleaserPublishesAndChecksumsTheRegistryManifest(t *testing.T) {
 	t.Parallel()
 
 	body, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yml"))
@@ -55,11 +57,14 @@ func TestGoreleaserPublishesTheRegistryManifest(t *testing.T) {
 	}
 	config := string(body)
 
-	if !strings.Contains(config, "terraform-registry-manifest.json") {
-		t.Error(".goreleaser.yml never references terraform-registry-manifest.json, so a release would omit it")
+	const source = "glob: terraform-registry-manifest.json"
+	if got := strings.Count(config, source); got != 2 {
+		t.Errorf(".goreleaser.yml contains %q %d times, want 2: once under checksum.extra_files and once under release.extra_files", source, got)
 	}
-	if !strings.Contains(config, "_manifest.json") {
-		t.Error(".goreleaser.yml does not publish the manifest as {name}_{version}_manifest.json, which is the name the registry looks for")
+
+	const publishedName = `name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"`
+	if got := strings.Count(config, publishedName); got != 2 {
+		t.Errorf(".goreleaser.yml contains %q %d times, want 2: the checksum entry and release asset must use the same registry filename", publishedName, got)
 	}
 }
 

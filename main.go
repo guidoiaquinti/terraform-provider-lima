@@ -20,7 +20,7 @@ import (
 // is the version being developed towards, with a -dev suffix so a local build
 // can never be mistaken for a release. Bump it after each tag, in step with
 // the Makefile's VERSION; docs/development/releasing.md lists this as a step.
-var version = "0.1.0-dev"
+var version = "0.1.1-dev"
 
 func main() {
 	var debug bool
