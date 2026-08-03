@@ -146,10 +146,12 @@ func TestShippedHCLUsesOnlyRealAttributeNames(t *testing.T) {
 	t.Parallel()
 
 	known := schemaAttributeNames(t)
-	parser := hclparse.NewParser()
 
 	for _, file := range hclFiles(t) {
 		t.Run(filepath.Base(filepath.Dir(file))+"/"+filepath.Base(file), func(t *testing.T) {
+			t.Parallel()
+
+			parser := hclparse.NewParser()
 			src, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatalf("reading %s: %v", file, err)

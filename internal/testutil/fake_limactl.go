@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,12 +30,7 @@ type Invocation struct {
 
 // Arg reports whether the invocation contained an exact argument.
 func (i Invocation) Arg(want string) bool {
-	for _, a := range i.Args {
-		if a == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(i.Args, want)
 }
 
 // EnvValue returns the value of an environment key, and whether it was set.
@@ -43,8 +39,8 @@ func (i Invocation) EnvValue(key string) (string, bool) {
 	// Later entries win, matching exec semantics.
 	val, found := "", false
 	for _, kv := range i.Env {
-		if strings.HasPrefix(kv, prefix) {
-			val, found = strings.TrimPrefix(kv, prefix), true
+		if value, ok := strings.CutPrefix(kv, prefix); ok {
+			val, found = value, true
 		}
 	}
 	return val, found
@@ -388,7 +384,10 @@ func (f *FakeLimactl) diskList() (string, string, int, error) {
 		if reported.Instance == "" {
 			reported.InstanceDir = ""
 		}
-		j, _ := json.Marshal(reported)
+		j, err := json.Marshal(reported)
+		if err != nil {
+			return "", "", 1, fmt.Errorf("marshalling fake disk %q: %w", n, err)
+		}
 		b.Write(j)
 		b.WriteByte('\n')
 	}
@@ -499,8 +498,8 @@ func parseIECSize(s string) (int64, bool) {
 		{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}, {"B", 1},
 	}
 	for _, u := range units {
-		if strings.HasSuffix(s, u.suffix) {
-			n, err := strconv.ParseInt(strings.TrimSuffix(s, u.suffix), 10, 64)
+		if value, ok := strings.CutSuffix(s, u.suffix); ok {
+			n, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return 0, false
 			}
@@ -633,7 +632,7 @@ func (f *FakeLimactl) Run(ctx context.Context, binary string, args []string, env
 	case "--version":
 		return "limactl version " + f.Version + "\n", "", 0, nil
 	case "info":
-		return f.infoJSON(), "", 0, nil
+		return f.infoJSON()
 	case "template":
 		return f.templateCopy(args)
 	case "disk":
@@ -733,7 +732,7 @@ func (f *FakeLimactl) templateCopy(args []string) (string, string, int, error) {
 	return b.String(), "", 0, nil
 }
 
-func (f *FakeLimactl) infoJSON() string {
+func (f *FakeLimactl) infoJSON() (string, string, int, error) {
 	type tmpl struct {
 		Name     string `json:"name"`
 		Location string `json:"location"`
@@ -753,8 +752,11 @@ func (f *FakeLimactl) infoJSON() string {
 		// fields are tolerated.
 		"guestAgents": map[string]any{"aarch64": map[string]string{"location": "/opt/lima/ga.gz"}},
 	}
-	b, _ := json.Marshal(doc)
-	return string(b) + "\n"
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return "", "", 1, fmt.Errorf("marshalling fake host info: %w", err)
+	}
+	return string(b) + "\n", "", 0, nil
 }
 
 // listJSON emits NDJSON, exactly like Lima: one object per line, no array.
@@ -799,7 +801,10 @@ func (f *FakeLimactl) listJSON(args []string) (string, string, int, error) {
 		out.HostArch = f.HostArch
 		out.LimaHome = f.LimaHome
 		out.LimaVersion = f.Version
-		j, _ := json.Marshal(out)
+		j, err := json.Marshal(out)
+		if err != nil {
+			return "", "", 1, fmt.Errorf("marshalling fake instance %q: %w", inst.Name, err)
+		}
 		b.Write(j)
 		b.WriteByte('\n')
 	}
@@ -831,9 +836,9 @@ func (f *FakeLimactl) capture(args []string) {
 }
 
 func lastPositional(args []string) string {
-	for i := len(args) - 1; i >= 0; i-- {
-		if !strings.HasPrefix(args[i], "-") {
-			return args[i]
+	for _, arg := range slices.Backward(args) {
+		if !strings.HasPrefix(arg, "-") {
+			return arg
 		}
 	}
 	return ""
@@ -1018,7 +1023,9 @@ func (f *FakeLimactl) del(args []string) (string, string, int, error) {
 		return "", warn(fmt.Sprintf("Ignoring non-existent instance `%s`", name)), 0, nil
 	}
 	if inst.Protected {
-		return "", fatal(fmt.Sprintf("failed to delete instance `%s`: instance is protected to prohibit accidental removal (Hint: use `limactl unprotect`)", name)), 1, nil
+		return "", fatal(fmt.Sprintf(
+			"failed to delete instance `%s`: instance is protected to prohibit accidental removal "+
+				"(Hint: use `limactl unprotect`)", name)), 1, nil
 	}
 	delete(f.instances, name)
 	return "", info(fmt.Sprintf("Deleted `%s`", name)), 0, nil
@@ -1039,8 +1046,8 @@ func (f *FakeLimactl) setProtect(args []string, want bool) (string, string, int,
 
 func flagValue(args []string, flag string) string {
 	for i, a := range args {
-		if strings.HasPrefix(a, flag+"=") {
-			return strings.TrimPrefix(a, flag+"=")
+		if value, ok := strings.CutPrefix(a, flag+"="); ok {
+			return value
 		}
 		if a == flag && i+1 < len(args) {
 			return args[i+1]

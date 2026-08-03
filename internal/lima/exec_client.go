@@ -32,7 +32,9 @@ type Runner interface {
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, binary string, args []string, env []string) (string, string, int, error) {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	// The provider's purpose is to execute the user-configured limactl binary;
+	// resolveBinary validates that path before it reaches this boundary.
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- validated executable is intentionally configurable
 	cmd.Env = env
 	// Lima must never read from a terminal. An explicitly empty stdin makes
 	// any prompt fail fast instead of hanging Terraform.
@@ -126,10 +128,10 @@ func resolveBinary(binary string) (string, error) {
 			return "", err
 		}
 		info, err := os.Stat(expanded)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", fmt.Errorf("no such file: %s", expanded)
-			}
+		switch {
+		case os.IsNotExist(err):
+			return "", fmt.Errorf("no such file: %s", expanded)
+		case err != nil:
 			return "", fmt.Errorf("cannot stat %s: %w", expanded, err)
 		}
 		if info.IsDir() {

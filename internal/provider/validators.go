@@ -64,11 +64,11 @@ func (v sizeValidator) ValidateString(_ context.Context, req validator.StringReq
 	}
 	size, err := lima.ParseSize(req.ConfigValue.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Invalid %s", v.attribute), err.Error())
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+v.attribute, err.Error())
 		return
 	}
 	if size <= 0 {
-		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Invalid %s", v.attribute),
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+v.attribute,
 			fmt.Sprintf("%q resolves to zero bytes; specify a positive size.", req.ConfigValue.ValueString()))
 	}
 }
@@ -126,7 +126,7 @@ func (v knownValueValidator) ValidateString(_ context.Context, req validator.Str
 	}
 	value := req.ConfigValue.ValueString()
 	if value == "" {
-		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Empty %s", v.label),
+		resp.Diagnostics.AddAttributeError(req.Path, "Empty "+v.label,
 			"The value must not be an empty string. Remove the attribute to use Lima's default.")
 		return
 	}
@@ -165,7 +165,7 @@ func (v requiredValueValidator) ValidateString(_ context.Context, req validator.
 		return
 	}
 	if !slices.Contains(v.allowed, req.ConfigValue.ValueString()) {
-		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Invalid %s", v.label),
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+v.label,
 			fmt.Sprintf("%q is not a valid %s. Valid values are: %v.",
 				req.ConfigValue.ValueString(), v.label, v.allowed))
 	}
@@ -223,7 +223,7 @@ func (v nonEmptyValidator) ValidateString(_ context.Context, req validator.Strin
 		return
 	}
 	if isBlank(req.ConfigValue.ValueString()) {
-		resp.Diagnostics.AddAttributeError(req.Path, fmt.Sprintf("Empty %s", v.label),
+		resp.Diagnostics.AddAttributeError(req.Path, "Empty "+v.label,
 			fmt.Sprintf("The %s must not be empty or contain only whitespace.", v.label))
 	}
 }

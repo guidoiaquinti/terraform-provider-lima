@@ -6,6 +6,7 @@ package lima
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -113,7 +114,7 @@ type RenderRequest struct {
 // meaningful.
 func Render(req RenderRequest) ([]byte, error) {
 	if req.Template != "" && req.RawConfig != "" {
-		return nil, fmt.Errorf("template and config are mutually exclusive")
+		return nil, errors.New("template and config are mutually exclusive")
 	}
 
 	// Start from the base document: either a `base:` reference to a template,
@@ -153,7 +154,7 @@ func Render(req RenderRequest) ([]byte, error) {
 	}
 
 	if len(doc) == 0 {
-		return nil, fmt.Errorf("rendered an empty Lima configuration: set template, config, or at least one VM attribute")
+		return nil, errors.New("rendered an empty Lima configuration: set template, config, or at least one VM attribute")
 	}
 
 	out, err := marshalDeterministic(doc)

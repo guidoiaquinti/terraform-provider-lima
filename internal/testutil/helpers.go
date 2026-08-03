@@ -33,7 +33,7 @@ func StubBinary(t *testing.T) string {
 // would make instance creation fail. Acceptance tests need a short base.
 func ShortHome(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "ltf")
+	dir, err := os.MkdirTemp("/tmp", "ltf") //nolint:usetesting // t.TempDir is too long for Lima's UNIX socket path
 	if err != nil {
 		t.Fatalf("creating short LIMA_HOME: %v", err)
 	}

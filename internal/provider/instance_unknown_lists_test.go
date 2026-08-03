@@ -48,7 +48,7 @@ func instanceSchemaForTest(t *testing.T) (context.Context, tfsdk.Config) {
 // configValue builds a raw configuration in which every attribute is null,
 // except those named in overrides. That mirrors a configuration where only a
 // couple of things are written and the rest are left to defaults.
-func configValue(t *testing.T, ctx context.Context, cfg tfsdk.Config, overrides map[string]tftypes.Value) tftypes.Value {
+func configValue(ctx context.Context, t *testing.T, cfg tfsdk.Config, overrides map[string]tftypes.Value) tftypes.Value {
 	t.Helper()
 
 	objType, ok := cfg.Schema.Type().TerraformType(ctx).(tftypes.Object)
@@ -68,7 +68,7 @@ func configValue(t *testing.T, ctx context.Context, cfg tfsdk.Config, overrides 
 }
 
 // attributeType returns the Terraform type of a schema attribute.
-func attributeType(t *testing.T, ctx context.Context, cfg tfsdk.Config, name string) tftypes.Type {
+func attributeType(ctx context.Context, t *testing.T, cfg tfsdk.Config, name string) tftypes.Type {
 	t.Helper()
 	objType, ok := cfg.Schema.Type().TerraformType(ctx).(tftypes.Object)
 	if !ok {
@@ -89,10 +89,10 @@ func TestConfigDecodesUnknownListAttributes(t *testing.T) {
 			t.Parallel()
 			ctx, cfg := instanceSchemaForTest(t)
 
-			cfg.Raw = configValue(t, ctx, cfg, map[string]tftypes.Value{
+			cfg.Raw = configValue(ctx, t, cfg, map[string]tftypes.Value{
 				"name":     tftypes.NewValue(tftypes.String, "dev"),
 				"template": tftypes.NewValue(tftypes.String, "template:ubuntu"),
-				attr:       tftypes.NewValue(attributeType(t, ctx, cfg, attr), tftypes.UnknownValue),
+				attr:       tftypes.NewValue(attributeType(ctx, t, cfg, attr), tftypes.UnknownValue),
 			})
 
 			var config instanceModel
@@ -117,10 +117,10 @@ func TestValidateConfigWithUnknownListsStillChecksOtherAttributes(t *testing.T) 
 	t.Parallel()
 	ctx, cfg := instanceSchemaForTest(t)
 
-	cfg.Raw = configValue(t, ctx, cfg, map[string]tftypes.Value{
+	cfg.Raw = configValue(ctx, t, cfg, map[string]tftypes.Value{
 		"name":         tftypes.NewValue(tftypes.String, "not a valid lima name"),
 		"template":     tftypes.NewValue(tftypes.String, "template:ubuntu"),
-		attrProvisions: tftypes.NewValue(attributeType(t, ctx, cfg, attrProvisions), tftypes.UnknownValue),
+		attrProvisions: tftypes.NewValue(attributeType(ctx, t, cfg, attrProvisions), tftypes.UnknownValue),
 	})
 
 	var config instanceModel

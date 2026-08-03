@@ -278,7 +278,7 @@ func TestImportWarningMatchesReplacementBehaviour(t *testing.T) {
 // carries a claim. Splitting on sentences instead would let a claim about one
 // attribute be read against another across a paragraph boundary.
 func paragraphMentioning(body, attr string) string {
-	for _, p := range strings.Split(body, "\n\n") {
+	for p := range strings.SplitSeq(body, "\n\n") {
 		if strings.Contains(p, attr) {
 			return strings.TrimSpace(p)
 		}

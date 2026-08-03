@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -149,7 +150,7 @@ func accVMType(t *testing.T) string {
 func accMountDir(t *testing.T, suffix string) string {
 	t.Helper()
 	// Kept under /tmp so the path stays short and predictable on both hosts.
-	dir, err := os.MkdirTemp("/tmp", "ltfmnt")
+	dir, err := os.MkdirTemp("/tmp", "ltfmnt") //nolint:usetesting // a short, guest-visible path is required
 	if err != nil {
 		t.Fatalf("creating mount directory: %v", err)
 	}
@@ -193,6 +194,8 @@ const hostagentLogTail = 4000
 // single uniform line serves every test case and nothing is missed when a test
 // creates more than one VM.
 func accDumpLogsOnError(t *testing.T) resource.ErrorCheckFunc {
+	t.Helper()
+
 	return func(err error) error {
 		t.Helper()
 		if accSetUp() {
@@ -272,6 +275,8 @@ func destroyInstance(t *testing.T, name string) {
 
 // checkLimaStatus asserts the real status Lima reports, independently of state.
 func checkLimaStatus(t *testing.T, name string, want lima.Status) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -290,6 +295,8 @@ func checkLimaStatus(t *testing.T, name string, want lima.Status) resource.TestC
 // checkLimaResources asserts the resources Lima actually reports, so a test
 // cannot pass on Terraform state alone.
 func checkLimaResources(t *testing.T, name string, cpus, memoryBytes int64) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -310,6 +317,8 @@ func checkLimaResources(t *testing.T, name string, cpus, memoryBytes int64) reso
 
 // checkLimaAbsent asserts the instance is gone from Lima.
 func checkLimaAbsent(t *testing.T, name string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -477,10 +486,10 @@ resource "lima_instance" "test" {
 						}
 					}
 					if s.Attributes["arch"] == "" {
-						return fmt.Errorf("import did not record arch")
+						return errors.New("import did not record arch")
 					}
 					if s.Attributes["disk"] == "" {
-						return fmt.Errorf("import did not record disk")
+						return errors.New("import did not record disk")
 					}
 					// Unknowable configuration must still not be invented.
 					if v := s.Attributes["template"]; v != "" {
@@ -696,7 +705,7 @@ resource "lima_instance" "test" {
 							return err
 						}
 						if !inst.Protected {
-							return fmt.Errorf("Lima does not report the instance as protected")
+							return errors.New("Lima does not report the instance as protected")
 						}
 						return nil
 					},
@@ -1256,6 +1265,8 @@ resource "lima_instance" "test" {
 
 // checkLimaHasMount asserts against Lima's resolved configuration directly.
 func checkLimaHasMount(t *testing.T, name, location, mountPoint string, writable bool) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -1274,6 +1285,8 @@ func checkLimaHasMount(t *testing.T, name, location, mountPoint string, writable
 
 // checkLimaHasPortForward asserts against Lima's resolved configuration.
 func checkLimaHasPortForward(t *testing.T, name string, guestPort, hostPort int64, proto string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -1365,6 +1378,8 @@ resource "lima_instance" %q {
 // checkResolvedConfigMatches asserts two instances resolved to the same mounts
 // and port forwards.
 func checkResolvedConfigMatches(t *testing.T, a, b string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -1538,6 +1553,8 @@ resource "lima_instance" "test" {
 
 // checkInstanceUsesAlpineImage asserts the VM still has its original image.
 func checkInstanceUsesAlpineImage(t *testing.T, name string) resource.TestCheckFunc {
+	t.Helper()
+
 	return func(*terraform.State) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()

@@ -196,7 +196,7 @@ func TestBuildEnvIsDeterministic(t *testing.T) {
 	extra := map[string]string{"C": "3", "A": "1", "B": "2"}
 
 	first := buildEnv(base, "/tmp/lima", extra)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		if got := buildEnv(base, "/tmp/lima", extra); !reflect.DeepEqual(got, first) {
 			t.Fatalf("buildEnv is not deterministic:\n%v\nvs\n%v", got, first)
 		}

@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	defaultPollInterval    = 2 * time.Second
+	defaultPollMaxInterval = 15 * time.Second
+)
+
 // PollOptions configures Poll. The zero value uses sensible defaults.
 type PollOptions struct {
 	// Interval is the first wait between attempts. Default 2s.
@@ -25,10 +30,10 @@ type PollOptions struct {
 
 func (o PollOptions) withDefaults() PollOptions {
 	if o.Interval <= 0 {
-		o.Interval = 2 * time.Second
+		o.Interval = defaultPollInterval
 	}
 	if o.MaxInterval <= 0 {
-		o.MaxInterval = 15 * time.Second
+		o.MaxInterval = defaultPollMaxInterval
 	}
 	if o.Factor < 1 {
 		o.Factor = 1.5
@@ -135,10 +140,7 @@ func Poll(ctx context.Context, opts PollOptions, operation, want string, check f
 			return err
 		}
 
-		next := time.Duration(float64(interval) * o.Factor)
-		if next > o.MaxInterval {
-			next = o.MaxInterval
-		}
+		next := min(time.Duration(float64(interval)*o.Factor), o.MaxInterval)
 		interval = next
 	}
 }

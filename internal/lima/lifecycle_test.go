@@ -476,10 +476,10 @@ func TestServiceOperationsAreSerializedPerInstance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() { errs <- svc.EnsureRunning(ctx, "dev") }()
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errs; err != nil {
 			t.Errorf("EnsureRunning: %v", err)
 		}
@@ -795,7 +795,7 @@ func TestServiceResizeSerializesWithOtherOperations(t *testing.T) {
 	}()
 	go func() { errs <- svc.EnsureRunning(ctx, "dev") }()
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errs; err != nil {
 			t.Errorf("concurrent operation failed: %v", err)
 		}

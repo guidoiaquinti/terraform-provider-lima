@@ -92,7 +92,7 @@ func TestCommandErrorDetailsAreBounded(t *testing.T) {
 	t.Parallel()
 
 	var b strings.Builder
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		b.WriteString(limaLog("info", fmt.Sprintf("line %d", i)))
 	}
 	b.WriteString(limaLog("fatal", "the actual failure"))

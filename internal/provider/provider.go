@@ -401,8 +401,11 @@ func statusVocabulary() string {
 	for _, s := range lima.AllStatuses {
 		labels = append(labels, "`"+string(s)+"`")
 	}
-	if len(labels) < 2 {
-		return strings.Join(labels, "")
+	switch len(labels) {
+	case 0:
+		return ""
+	case 1:
+		return labels[0]
 	}
 	return strings.Join(labels[:len(labels)-1], ", ") + " or " + labels[len(labels)-1]
 }
@@ -420,7 +423,7 @@ func homeLabel(data *providerData) string {
 
 // providerDataFrom extracts the shared provider data, reporting a clear
 // diagnostic if the framework handed over something unexpected.
-func providerDataFrom(raw any, diags interface{ AddError(string, string) }) *providerData {
+func providerDataFrom(raw any, diags interface{ AddError(summary, detail string) }) *providerData {
 	if raw == nil {
 		// Terraform calls schema methods before Configure; returning nil is
 		// expected and callers must handle it.

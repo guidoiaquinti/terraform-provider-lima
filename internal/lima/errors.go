@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -49,9 +50,9 @@ func (e *CommandError) Message() string {
 	if len(lines) == 0 {
 		return ""
 	}
-	for i := len(lines) - 1; i >= 0; i-- {
-		if lines[i].Level == "fatal" || lines[i].Level == "error" {
-			return lines[i].Message
+	for _, line := range slices.Backward(lines) {
+		if line.Level == "fatal" || line.Level == "error" {
+			return line.Message
 		}
 	}
 	return lines[len(lines)-1].Message
@@ -98,7 +99,7 @@ var logrusLine = regexp.MustCompile(`^time="[^"]*"\s+level=(\w+)\s+msg=(.*)$`)
 // log format are passed through verbatim.
 func SanitizeStderrLines(stderr string) []LogLine {
 	var out []LogLine
-	for _, raw := range strings.Split(stderr, "\n") {
+	for raw := range strings.SplitSeq(stderr, "\n") {
 		line := strings.TrimRight(raw, "\r \t")
 		if line == "" {
 			continue

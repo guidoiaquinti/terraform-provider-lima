@@ -999,11 +999,15 @@ func (r *instanceResource) troubleshoot(name, operation string) string {
 	case "stop":
 		return fmt.Sprintf("Check the current status, and force a stop if the guest is unresponsive:\n\n    limactl list %s\n    limactl stop --force %s", name, name)
 	case "delete":
-		return fmt.Sprintf("Check whether the instance is still present, then remove it forcibly if required:\n\n    limactl list %s\n    limactl delete --force %s", name, name)
+		return fmt.Sprintf(
+			"Check whether the instance is still present, then remove it forcibly if required:\n\n"+
+				"    limactl list %s\n    limactl delete --force %s", name, name)
 	case "resize":
-		return fmt.Sprintf("Check the current resources and try the change directly:\n\n    limactl list %s\n    limactl edit --tty=false --cpus N --memory G %s", name, name)
+		return fmt.Sprintf(
+			"Check the current resources and try the change directly:\n\n"+
+				"    limactl list %s\n    limactl edit --tty=false --cpus N --memory G %s", name, name)
 	default:
-		return fmt.Sprintf("Inspect the instance with:\n\n    limactl list %s", name)
+		return "Inspect the instance with:\n\n    limactl list " + name
 	}
 }
 
@@ -1148,7 +1152,7 @@ func resizeRequest(plan, state *instanceModel) (lima.EditRequest, diag.Diagnosti
 		}
 		want, err := lima.ParseSize(planned.ValueString())
 		if err != nil {
-			diags.AddAttributeError(path.Root(attribute), fmt.Sprintf("Invalid %s", attribute), err.Error())
+			diags.AddAttributeError(path.Root(attribute), "Invalid "+attribute, err.Error())
 			return 0
 		}
 		if !current.IsNull() {

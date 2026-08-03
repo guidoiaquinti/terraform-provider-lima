@@ -14,9 +14,10 @@ func TestParseDisks(t *testing.T) {
 
 	// Captured verbatim from Lima 2.2.0: NDJSON, one object per line, with no
 	// enclosing array. See docs/development/lima-cli-contract.md §13.1.
-	const output = `{"name":"data","size":1073741824,"format":"raw","dir":"/private/tmp/ltfdisk/_disks/data","instance":"","instanceDir":"","mountPoint":"/mnt/lima-data"}
-{"name":"scratch","size":10737418240,"format":"raw","dir":"/private/tmp/ltfdisk/_disks/scratch","instance":"dev","instanceDir":"/private/tmp/ltfdisk/dev","mountPoint":"/mnt/lima-scratch"}
-`
+	const output = `{"name":"data","size":1073741824,"format":"raw","dir":"/private/tmp/ltfdisk/_disks/data",` +
+		`"instance":"","instanceDir":"","mountPoint":"/mnt/lima-data"}` + "\n" +
+		`{"name":"scratch","size":10737418240,"format":"raw","dir":"/private/tmp/ltfdisk/_disks/scratch",` +
+		`"instance":"dev","instanceDir":"/private/tmp/ltfdisk/dev","mountPoint":"/mnt/lima-scratch"}` + "\n"
 
 	got, err := ParseDisksString(output)
 	if err != nil {
