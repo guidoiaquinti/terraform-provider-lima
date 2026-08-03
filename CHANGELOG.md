@@ -12,6 +12,18 @@ the steps to migrate. See
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-03
+
+### Fixed
+
+- Include the Terraform Registry manifest in the signed SHA256 checksum file as
+  well as in the release assets. The Registry rejected `v0.1.0` because the
+  manifest was uploaded without a corresponding checksum, so that version was
+  never installable from the Registry; use `v0.1.1` instead.
+- Generate GitHub release notes from merged pull requests rather than raw
+  commits, avoiding duplicate branch/merge entries and commit-author email
+  addresses.
+
 ## [0.1.0] - 2026-08-02
 
 First release.
@@ -55,5 +67,6 @@ First release.
 - Windows binaries are published because Lima supports WSL2, but the provider is
   untested there.
 
-[Unreleased]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/guidoiaquinti/terraform-provider-lima/releases/tag/v0.1.0
