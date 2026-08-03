@@ -20,10 +20,7 @@ import (
 // nonInteractive is passed to every mutating command. Lima defaults --tty to
 // true when stdout is a terminal, which would open $EDITOR or prompt; both
 // would hang Terraform forever.
-const (
-	nonInteractive   = "--tty=false"
-	listBaseArgCount = 4
-)
+const nonInteractive = "--tty=false"
 
 func versionArgs() []string { return []string{"--version"} }
 
@@ -35,9 +32,7 @@ func infoArgs() []string { return []string{"info"} }
 // Passing no name lists everything and never fails on absence, which is why
 // the lifecycle layer prefers it over a name-scoped call.
 func listArgs(names ...string) []string {
-	args := make([]string, 0, listBaseArgCount+len(names))
-	args = append(args, "list", "--format", "json", "--all-fields")
-	return append(args, names...)
+	return append([]string{"list", "--format", "json", "--all-fields"}, names...)
 }
 
 func validateArgs(path string) []string { return []string{"validate", path} }

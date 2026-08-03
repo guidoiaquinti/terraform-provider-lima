@@ -672,8 +672,7 @@ func mergeMounts(resolved []MountView, previous, desired []Mount) []Mount {
 
 	// Declared mounts first, then template-contributed ones, matching the
 	// order `limactl create` produces.
-	out := make([]Mount, 0, len(desired)+len(keep))
-	out = append(out, desired...)
+	out := slices.Grow(slices.Clone(desired), len(keep))
 	for _, m := range keep {
 		// A location the user now declares must not also survive as an
 		// inherited entry, or it would be mounted twice.
@@ -734,8 +733,7 @@ func mergePortForwards(resolved []PortForwardView, previous, desired []PortForwa
 		}
 	}
 
-	out := make([]PortForward, 0, len(desired)+len(keep))
-	out = append(out, desired...)
+	out := slices.Grow(slices.Clone(desired), len(keep))
 	for _, p := range keep {
 		if indexByForward(desired, p.GuestPort, p.Proto, portForwardKey) >= 0 {
 			continue
