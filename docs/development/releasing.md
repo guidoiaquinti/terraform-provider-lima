@@ -84,8 +84,9 @@ genuinely unclear, bump the minor.
   the foot of the file. Every breaking change needs an entry under `Changed` or
   `Removed` **with its migration steps**; that is the standing trade for being
   allowed to break the schema pre-1.0.
-- `main.go` and `Makefile` — the `0.X.Y-dev` default is the version being
-  developed *towards*, so bump both to the next version after tagging (step 6).
+- `main.go` and `Makefile` — both must read `X.Y.Z-dev` for the version being
+  released, because the `-dev` default names the version being developed
+  *towards*.
 - `README.md` and `templates/index.md.tmpl` — the `Provider version` column in
   the Lima compatibility table, and the `~> 0.1.0` pin in the Quick start, if
   the minor changed. Run `make docs` afterwards; `make docs-check` enforces it.
@@ -173,10 +174,14 @@ protocol version — which no local test can.
 
 ### 7. Open the next version
 
-Bump the `-dev` default in `main.go` and `VERSION` in the `Makefile` to the next
-version — after `v0.1.0`, both become `0.2.0-dev`. They name the version being
-developed towards, so leaving them at the version just released makes every
-local build claim to be that release.
+Bump the `-dev` default in `main.go` and `VERSION` in the `Makefile` to the
+version you expect to release next — after `v0.1.1`, both become `0.1.2-dev`.
+They name the version being developed towards, so leaving them at the version
+just released makes every local build claim to be that release.
+
+Pick the next patch unless you already know the next release is a minor. Being
+wrong here is cheap: the version is only a default for local builds, and step 2
+of the next release corrects it. Being *stale* is the failure that matters.
 
 Nothing enforces this, because nothing can: a build from an untagged tree has no
 correct version to check against. It is a step in this list precisely because it
