@@ -12,6 +12,35 @@ the steps to migrate. See
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing a key in `config_overrides` now removes it from the configuration
+  Lima resolves, including values a `template` contributed. Previously the key
+  was dropped from the generated document, which Lima could not distinguish from
+  a key that was never set, so the template's value won — most visibly leaving
+  `mounts: null` unable to remove the home directory mount that stock templates
+  bring in via `template:_default/mounts`. Removals are now written out as an
+  explicit `null`, which Lima honours across its `base:` merge. An empty
+  sequence in `config_overrides` is treated as the same removal, so
+  `mounts: []` and `mounts: null` agree. ([#12])
+
+  This changes `config_hash` for configurations that remove a key or set one to
+  an empty sequence in `config_overrides`. The hash covers the generated
+  document, and that document is now different — and correct. No instance is
+  replaced by the change alone, but the first plan after upgrading shows the new
+  hash.
+
+### Changed
+
+- Documented that typed `mounts` and `port_forwards` are **added to** what the
+  base template contributes and cannot remove them, so `mounts = []` shares
+  nothing extra rather than nothing at all. The previous wording ("Mounts the
+  base template contributes are preserved") read as a note about ordering. The
+  new text points at `config_overrides` with `mounts: null` as the way to end up
+  with no mounts. ([#12])
+
+[#12]: https://github.com/guidoiaquinti/terraform-provider-lima/issues/12
+
 ## [0.1.1] - 2026-08-03
 
 ### Fixed

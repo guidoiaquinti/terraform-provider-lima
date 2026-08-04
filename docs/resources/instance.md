@@ -78,7 +78,43 @@ Merge semantics inside that chain:
   `mounts` grow on every render, and there is no reliable identity by which to
   match elements.
 - **An explicit `null` removes a key.** This is the only way to unset something
-  a template set.
+  a template set. In `config_overrides` an empty sequence means the same thing,
+  so `mounts: []` and `mounts: null` both clear the list.
+
+### Removing what a template contributes
+
+A `template` is rendered as a `base:` reference, which means Lima merges the
+template's own keys in *after* the provider's document is complete. Two
+consequences follow, and both are Lima's behaviour rather than the provider's
+choice:
+
+- **Sequences a template contributes are appended to, not replaced.** Declaring
+  `mounts` gives you your entries *plus* the template's, in that order. Most
+  stock templates pull in `template:_default/mounts`, which mounts your home
+  directory, so an instance built from one has that mount unless you remove it.
+- **An empty list does not remove them.** Lima treats an empty sequence in the
+  child document as unset, so the template's entries survive.
+
+Clearing a key therefore has to be spelled as a removal in `config_overrides`,
+which the provider writes out as the explicit `null` that Lima honours:
+
+```hcl
+resource "lima_instance" "ci" {
+  name     = "ci"
+  template = "template:ubuntu"
+
+  # No host directory is shared into the guest, not even $HOME.
+  config_overrides = "mounts: null\n"
+}
+```
+
+`config_overrides` is merged last, so this clears the mounts a typed `mounts`
+attribute contributed as well — the two cannot be combined to keep your own
+entries while dropping the template's. Nothing else can express that either,
+because Lima appends the template's entries whatever the child document says. To
+have exactly the mounts you list and nothing more, use `config` with a complete
+Lima document that does not itself use `base:`; such a document is not composed
+by Lima, so its `mounts` are the whole list.
 
 Generation is deterministic: keys are sorted at every level and no YAML anchors
 or aliases are emitted, so the same inputs always produce byte-identical output.
@@ -100,14 +136,18 @@ Changing this is applied **in place**, stopping and restarting a running instanc
 - `config` (String) Complete Lima YAML configuration, used instead of `template`. Typed attributes and `config_overrides` are merged over it. Stored normalised, so whitespace and key-order changes do not produce a diff. Conflicts with `template`. Changing this forces a new instance.
 
 Not marked sensitive, so changes to it are reviewable in a plan — which is the point of keeping a VM definition in version control. Lima YAML is configuration, not a credential store; if you do embed a secret here it will appear in plan output and in state, so pass it through a `provision` script from a sensitive variable instead.
-- `config_overrides` (String) YAML fragment merged last, as an escape hatch for Lima options without a typed attribute. Mappings merge key by key, sequences are replaced wholesale, and an explicit `null` removes a key. Changing this forces a new instance.
+- `config_overrides` (String) YAML fragment merged last, as an escape hatch for Lima options without a typed attribute. Mappings merge key by key, sequences are replaced wholesale, and an explicit `null` removes a key. An empty sequence is a removal too, so `mounts: []` and `mounts: null` both clear the list. Changing this forces a new instance.
+
+Removing a key here is the only way to drop something a `template` contributed, such as the home directory mount most stock templates bring in: `mounts: null` leaves the instance with no mounts at all. Because this layer is merged last, it also clears whatever a typed attribute set.
 
 Not marked sensitive, for the same reason as `config`.
 - `cpus` (Number) Number of virtual CPUs. Must be greater than zero. Changing this is applied **in place** via `limactl edit`. Because Lima cannot edit a running instance, a running VM is stopped, reconfigured and started again, which means brief downtime.
 - `disk` (String) Primary disk size, for example `50GiB`. Growing is applied **in place** via `limactl edit`, stopping and restarting a running instance. Shrinking is rejected at plan time, because Lima cannot shrink a disk.
 - `memory` (String) Memory size, for example `4GiB` or `8192MiB`. Sizes are compared by byte count, so equivalent spellings do not differ. Changing this is applied **in place** via `limactl edit`, stopping and restarting a running instance.
-- `mounts` (Attributes List) Host directories shared into the guest, in order. Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. Mounts the base template contributes are preserved. (see [below for nested schema](#nestedatt--mounts))
-- `port_forwards` (Attributes List) Guest ports forwarded to the host, in order. Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. (see [below for nested schema](#nestedatt--port_forwards))
+- `mounts` (Attributes List) Host directories shared into the guest, in order. Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance.
+
+These are **added to** the mounts the base template contributes, which for most stock templates includes your home directory. Setting this to `[]` therefore shares nothing extra rather than sharing nothing at all: an empty list cannot remove what the template brought in. To have no mounts, clear them in `config_overrides` with `mounts: null`. (see [below for nested schema](#nestedatt--mounts))
+- `port_forwards` (Attributes List) Guest ports forwarded to the host, in order. Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. Like `mounts`, these are added to what the base template contributes; `config_overrides` with `portForwards: null` is what removes those. (see [below for nested schema](#nestedatt--port_forwards))
 - `protect` (Boolean) Whether Lima's deletion protection is enabled, via `limactl protect`. Applied **in place**. While `true`, `terraform destroy` fails with an explanatory error rather than silently removing protection.
 - `provisions` (Attributes List) Native Lima provisioning steps, in order. These run during instance creation, not on every apply. Changing any of them forces a new instance. (see [below for nested schema](#nestedatt--provisions))
 - `start` (Boolean) Whether the instance should be running after apply. Defaults to `true`. Changing this starts or stops the instance **in place**, without replacement.

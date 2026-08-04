@@ -78,7 +78,43 @@ Merge semantics inside that chain:
   `mounts` grow on every render, and there is no reliable identity by which to
   match elements.
 - **An explicit `null` removes a key.** This is the only way to unset something
-  a template set.
+  a template set. In `config_overrides` an empty sequence means the same thing,
+  so `mounts: []` and `mounts: null` both clear the list.
+
+### Removing what a template contributes
+
+A `template` is rendered as a `base:` reference, which means Lima merges the
+template's own keys in *after* the provider's document is complete. Two
+consequences follow, and both are Lima's behaviour rather than the provider's
+choice:
+
+- **Sequences a template contributes are appended to, not replaced.** Declaring
+  `mounts` gives you your entries *plus* the template's, in that order. Most
+  stock templates pull in `template:_default/mounts`, which mounts your home
+  directory, so an instance built from one has that mount unless you remove it.
+- **An empty list does not remove them.** Lima treats an empty sequence in the
+  child document as unset, so the template's entries survive.
+
+Clearing a key therefore has to be spelled as a removal in `config_overrides`,
+which the provider writes out as the explicit `null` that Lima honours:
+
+```hcl
+resource "lima_instance" "ci" {
+  name     = "ci"
+  template = "template:ubuntu"
+
+  # No host directory is shared into the guest, not even $HOME.
+  config_overrides = "mounts: null\n"
+}
+```
+
+`config_overrides` is merged last, so this clears the mounts a typed `mounts`
+attribute contributed as well — the two cannot be combined to keep your own
+entries while dropping the template's. Nothing else can express that either,
+because Lima appends the template's entries whatever the child document says. To
+have exactly the mounts you list and nothing more, use `config` with a complete
+Lima document that does not itself use `base:`; such a document is not composed
+by Lima, so its `mounts` are the whole list.
 
 Generation is deterministic: keys are sorted at every level and no YAML anchors
 or aliases are emitted, so the same inputs always produce byte-identical output.
