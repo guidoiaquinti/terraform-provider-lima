@@ -150,10 +150,10 @@ func Render(req RenderRequest) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		doc = mergeMaps(doc, overrideTree)
+		doc = mergeMaps(doc, markEmptySequencesAsClears(overrideTree))
 	}
 
-	if len(doc) == 0 {
+	if !configuresAnything(doc) {
 		return nil, errors.New("rendered an empty Lima configuration: set template, config, or at least one VM attribute")
 	}
 
@@ -258,6 +258,15 @@ func normalizeValue(v any) any {
 // re-rendered, and there is no sensible identity by which to match elements.
 // An explicit null removes the key, which is the only way to unset something a
 // template set.
+//
+// A removal is written out as `key: null` rather than by dropping the key,
+// which is what makes it work against a template. A template is rendered as a
+// `base:` reference, so Lima merges the template's keys in *after* this
+// document is complete; a dropped key is then indistinguishable from one that
+// was never set, and the template's value wins. Lima honours an explicit null
+// as "clear this" across that merge, so that is what gets emitted. Verified
+// against Lima 2.2.0; see docs/development/lima-cli-contract.md §12.11 and
+// issue #12.
 func mergeMaps(dst, src map[string]any) map[string]any {
 	out := make(map[string]any, len(dst)+len(src))
 	for k, v := range dst {
@@ -265,7 +274,7 @@ func mergeMaps(dst, src map[string]any) map[string]any {
 	}
 	for k, v := range src {
 		if v == nil {
-			delete(out, k)
+			out[k] = nil
 			continue
 		}
 		existing, ok := out[k]
@@ -282,6 +291,54 @@ func mergeMaps(dst, src map[string]any) map[string]any {
 		out[k] = deepCopy(v)
 	}
 	return out
+}
+
+// markEmptySequencesAsClears rewrites every empty sequence in an overlay layer
+// into an explicit null.
+//
+// The two spellings mean the same thing here — "replace this sequence with
+// nothing" — but Lima's `base:` merge only honours one of them: an empty
+// sequence in the child document is treated as unset and the template's own
+// entries survive, while a null clears them. Rewriting at the boundary is what
+// keeps `mounts: []` and `mounts: null` from behaving differently.
+//
+// Only overlay layers are rewritten. A raw `config` is the user's complete
+// document rather than a fragment merged over something, so it is passed to
+// Lima exactly as written. Sequence *elements* are left alone for the same
+// reason: a sequence replaces its counterpart wholesale, so nothing inside one
+// is merged with anything and an empty list in there is just an empty list.
+func markEmptySequencesAsClears(tree map[string]any) map[string]any {
+	out := make(map[string]any, len(tree))
+	for k, v := range tree {
+		switch t := v.(type) {
+		case []any:
+			if len(t) == 0 {
+				out[k] = nil
+				continue
+			}
+			out[k] = v
+		case map[string]any:
+			out[k] = markEmptySequencesAsClears(t)
+		default:
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// configuresAnything reports whether a rendered document sets anything at all.
+//
+// Keys whose value is a clear do not count: a document that only removes keys
+// asks Lima for nothing, and the caller's diagnostic ("set template, config, or
+// at least one VM attribute") is the useful answer rather than whatever Lima
+// would say about a configuration with no images.
+func configuresAnything(doc map[string]any) bool {
+	for _, v := range doc {
+		if v != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func deepCopy(v any) any {

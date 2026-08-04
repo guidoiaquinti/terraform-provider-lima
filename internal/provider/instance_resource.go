@@ -118,7 +118,12 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Optional: true,
 				MarkdownDescription: "YAML fragment merged last, as an escape hatch for Lima options without a typed attribute. " +
 					"Mappings merge key by key, sequences are replaced wholesale, and an explicit `null` removes a key. " +
+					"An empty sequence is a removal too, so `mounts: []` and `mounts: null` both clear the list. " +
 					"Changing this forces a new instance.\n\n" +
+					"Removing a key here is the only way to drop something a `template` contributed, " +
+					"such as the home directory mount most stock templates bring in: `mounts: null` leaves the " +
+					"instance with no mounts at all. Because this layer is merged last, it also clears whatever a " +
+					"typed attribute set.\n\n" +
 					"Not marked sensitive, for the same reason as `config`.",
 				PlanModifiers: replace,
 				Validators:    []validator.String{YAML(attrConfigOverrides)},
@@ -192,8 +197,11 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			attrMounts: schema.ListNestedAttribute{
 				Optional: true,
 				MarkdownDescription: "Host directories shared into the guest, in order. " +
-					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. " +
-					"Mounts the base template contributes are preserved.",
+					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance.\n\n" +
+					"These are **added to** the mounts the base template contributes, which for most stock templates " +
+					"includes your home directory. Setting this to `[]` therefore shares nothing extra rather than " +
+					"sharing nothing at all: an empty list cannot remove what the template brought in. " +
+					"To have no mounts, clear them in `config_overrides` with `mounts: null`.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"location": schema.StringAttribute{
@@ -220,7 +228,9 @@ func (r *instanceResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			attrPortForwards: schema.ListNestedAttribute{
 				Optional: true,
 				MarkdownDescription: "Guest ports forwarded to the host, in order. " +
-					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance.",
+					"Changing them is applied **in place** via `limactl edit`, which stops and restarts a running instance. " +
+					"Like `mounts`, these are added to what the base template contributes; " +
+					"`config_overrides` with `portForwards: null` is what removes those.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"guest_port": schema.Int64Attribute{

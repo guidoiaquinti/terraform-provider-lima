@@ -1263,6 +1263,102 @@ resource "lima_instance" "test" {
 	})
 }
 
+// TestAccInstanceConfigOverridesClearsTemplateMounts is the end-to-end guard
+// for issue #12.
+//
+// The template is rendered as a `base:` reference, so Lima merges the
+// template's mounts in after the provider's document is complete. Removing a
+// key by dropping it from that document therefore does not remove anything:
+// Lima cannot tell it apart from a key that was never set, and
+// `template:_default/mounts` wins, leaving the user's home directory shared into
+// a VM they asked to have no mounts at all.
+//
+// The first step is the control, proving the template really does contribute a
+// mount, so the second step cannot pass by accident on a template that shares
+// nothing. See docs/development/lima-cli-contract.md §12.11.
+func TestAccInstanceConfigOverridesClearsTemplateMounts(t *testing.T) {
+	inherited := accName("mi")
+	cleared := accName("mc")
+	t.Cleanup(func() { destroyInstance(t, inherited) })
+	t.Cleanup(func() { destroyInstance(t, cleared) })
+
+	config := accProviderConfig() + fmt.Sprintf(`
+resource "lima_instance" "inherited" {
+  name     = %q
+  template = %q
+  start    = false
+}
+
+resource "lima_instance" "cleared" {
+  name     = %q
+  template = %q
+  start    = false
+
+  config_overrides = "mounts: null\n"
+}
+`, inherited, accTemplate, cleared, accTemplate)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ErrorCheck:               accDumpLogsOnError(t),
+		CheckDestroy: resource.ComposeAggregateTestCheckFunc(
+			checkLimaAbsent(t, inherited),
+			checkLimaAbsent(t, cleared),
+		),
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					checkLimaHasAnyMount(t, inherited),
+					checkLimaHasNoMounts(t, cleared),
+				),
+			},
+		},
+	})
+}
+
+// checkLimaHasAnyMount asserts the instance resolved at least one mount, which
+// is what makes a "no mounts" assertion elsewhere meaningful.
+func checkLimaHasAnyMount(t *testing.T, name string) resource.TestCheckFunc {
+	t.Helper()
+
+	return func(*terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		inst, err := accClient(t).Inspect(ctx, name)
+		if err != nil {
+			return fmt.Errorf("inspecting %q: %w", name, err)
+		}
+		if len(inst.Config.Mounts) == 0 {
+			return fmt.Errorf("instance %q resolved no mounts, so %s contributes none and "+
+				"the clearing assertion would pass for the wrong reason", name, accTemplate)
+		}
+		return nil
+	}
+}
+
+// checkLimaHasNoMounts asserts Lima resolved the instance with nothing mounted.
+func checkLimaHasNoMounts(t *testing.T, name string) resource.TestCheckFunc {
+	t.Helper()
+
+	return func(*terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		inst, err := accClient(t).Inspect(ctx, name)
+		if err != nil {
+			return fmt.Errorf("inspecting %q: %w", name, err)
+		}
+		if len(inst.Config.Mounts) > 0 {
+			return fmt.Errorf("instance %q was configured with `mounts: null` but resolved mounts: %+v",
+				name, inst.Config.Mounts)
+		}
+		return nil
+	}
+}
+
 // checkLimaHasMount asserts against Lima's resolved configuration directly.
 func checkLimaHasMount(t *testing.T, name, location, mountPoint string, writable bool) resource.TestCheckFunc {
 	t.Helper()

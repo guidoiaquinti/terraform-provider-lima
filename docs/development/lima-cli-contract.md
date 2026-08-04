@@ -762,6 +762,58 @@ Those attributes therefore keep `RequiresReplace`. `vm_type` has a
 `--vm-type` flag but is left as replace as well: switching backend on an
 existing disk image is not a change the provider can verify is safe.
 
+### 12.11 Only an explicit `null` clears a key a `base:` entry set
+
+This is what makes the difference between a key the provider *removes* and one
+it *never wrote*, and it is why removals are emitted rather than deleted.
+
+A template is rendered as a `base:` reference, so Lima merges the template's
+keys in after the provider's document is complete. Measured against Lima 2.2.0,
+with `rocky-9.yaml` — which pulls in `template:_default/mounts` — as the base,
+resolving each child document with `limactl template copy --fill`:
+
+| Child document  | Resolved mounts       |
+| --------------- | --------------------- |
+| (key absent)    | `/Users/alice`        |
+| `mounts: []`    | `/Users/alice`        |
+| `mounts: null`  | (none)                |
+| `mounts: [X]`   | `X`, `/Users/alice`   |
+
+Three properties follow:
+
+1. An **empty sequence is treated as unset**, so the base's entries survive. It
+   is indistinguishable from omitting the key.
+2. An **explicit null clears** the base's entries.
+3. A **non-empty sequence is appended to**, not replaced — the same behaviour
+   §12.8 records for create.
+
+So `mergeMaps` cannot implement "an explicit `null` removes a key" by dropping
+the key: within the provider's own document that removes the value, but the
+template's copy of it has not been merged in yet, and property 1 then makes the
+template win. Writing `key: null` into the document is the removal Lima honours.
+An empty sequence in an overlay layer is rewritten to the same null, so the two
+spellings of "replace this list with nothing" do not diverge.
+
+Confirmed by real instances rather than by `--fill` alone. Two instances created
+from `template:alpine`, one with `mounts: null` added:
+
+```console
+$ limactl list --format json --all-fields | jq -c '{name, mounts: [.config.mounts[]?.location]}'
+{"name":"fixed","mounts":[]}
+{"name":"plain","mounts":["/Users/alice"]}
+```
+
+**Nulls are accepted broadly, and refused where clearing is invalid.**
+`limactl validate` accepted `null` for `cpus`, `memory`, `disk`, `vmType`,
+`arch`, `containerd`, `provision`, `portForwards`, `additionalDisks`, `networks`,
+`env` and `ssh`. It rejected `images: null` with ``field `images` must be set``,
+which is the desired outcome: clearing the image list is a user error, and Lima
+reports it more precisely than the provider could.
+
+This is also why the reporter of issue #12 saw `--set '.mounts=[]'` work at the
+CLI: `--set` runs over the already-merged configuration (§12.8), where an empty
+sequence has nothing left to lose to.
+
 ## 13. Disks — `limactl disk`
 
 ```text

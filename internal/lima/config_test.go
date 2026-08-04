@@ -174,11 +174,147 @@ func TestRenderExplicitNullRemovesKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
-	if strings.Contains(string(got), "memory") {
-		t.Errorf("explicit null did not remove the key:\n%s", got)
+
+	// The removal is written out as an explicit null rather than by dropping
+	// the key, because dropping it only removes the value from *this*
+	// document. See TestRenderNullClearsKeyBehindTemplateBase.
+	want := "cpus: 4\nmemory: null\n"
+	if string(got) != want {
+		t.Errorf("Render() =\n%q\nwant:\n%q", got, want)
 	}
-	if !strings.Contains(string(got), "cpus: 4") {
-		t.Errorf("unrelated key was removed:\n%s", got)
+}
+
+// TestRenderNullClearsKeyBehindTemplateBase pins the fix for #12.
+//
+// A template is rendered as a `base:` reference, so its keys are merged in by
+// Lima *after* this document is written. Deleting a key here is therefore
+// indistinguishable from never setting it, and the base's value wins — which is
+// how `mounts: null` failed to remove the home directory mount that
+// `template:_default/mounts` contributes.
+//
+// Measured against Lima 2.2.0: an explicit `mounts: null` in the child document
+// clears the base's mounts, while omitting the key or setting it to `[]` leaves
+// them in place. See docs/development/lima-cli-contract.md §12.11.
+func TestRenderNullClearsKeyBehindTemplateBase(t *testing.T) {
+	t.Parallel()
+
+	got, err := Render(RenderRequest{
+		Template:  "template:ubuntu",
+		Overrides: "mounts: null\n",
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "base:\n- url: template:ubuntu\nmounts: null\n"
+	if string(got) != want {
+		t.Errorf("Render() =\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestRenderEmptySequenceOverrideClears covers the same clearing operation
+// spelled as an empty sequence.
+//
+// "Sequences are replaced wholesale" is the documented rule, so replacing one
+// with nothing has to mean nothing. Lima's base merge ignores an empty
+// sequence, so the request is written out as the null that it honours.
+func TestRenderEmptySequenceOverrideClears(t *testing.T) {
+	t.Parallel()
+
+	got, err := Render(RenderRequest{
+		Template:  "template:ubuntu",
+		Overrides: "mounts: []\n",
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "base:\n- url: template:ubuntu\nmounts: null\n"
+	if string(got) != want {
+		t.Errorf("Render() =\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestRenderEmptySequenceOverrideClearsTypedAttributes pins precedence:
+// config_overrides is merged last, so a clear there also removes what a typed
+// attribute contributed.
+func TestRenderEmptySequenceOverrideClearsTypedAttributes(t *testing.T) {
+	t.Parallel()
+
+	got, err := Render(RenderRequest{
+		Template:  "template:ubuntu",
+		Typed:     InstanceConfig{Mounts: []Mount{{Location: "/tmp/x"}}},
+		Overrides: "mounts: []\n",
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if strings.Contains(string(got), "/tmp/x") {
+		t.Errorf("override clear did not remove the typed mount:\n%s", got)
+	}
+	if !strings.Contains(string(got), "mounts: null") {
+		t.Errorf("override clear was not written as an explicit null:\n%s", got)
+	}
+}
+
+// TestRenderNestedClear covers a clear of a nested key, which must not disturb
+// its siblings.
+func TestRenderNestedClear(t *testing.T) {
+	t.Parallel()
+
+	got, err := Render(RenderRequest{
+		Template:  "template:ubuntu",
+		Overrides: "ssh:\n  localPort: null\n  forwardAgent: true\n",
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := strings.Join([]string{
+		"base:",
+		"- url: template:ubuntu",
+		"ssh:",
+		"  forwardAgent: true",
+		"  localPort: null",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Errorf("Render() =\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestRenderUnsetTypedListsDoNotClear is the regression guard for the fix: a
+// typed list the user never declared must stay absent, not become a null that
+// wipes the template's own entries.
+func TestRenderUnsetTypedListsDoNotClear(t *testing.T) {
+	t.Parallel()
+
+	got, err := Render(RenderRequest{
+		Template: "template:ubuntu",
+		Typed:    InstanceConfig{CPUs: 2},
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "base:\n- url: template:ubuntu\ncpus: 2\n"
+	if string(got) != want {
+		t.Errorf("Render() =\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestRenderOnlyClearsIsEmpty keeps the "nothing configured" diagnostic: a
+// document that only removes keys configures nothing at all.
+func TestRenderOnlyClearsIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	_, err := Render(RenderRequest{Overrides: "mounts: null\n"})
+	if err == nil {
+		t.Fatal("Render returned no error for a document that only clears keys")
+	}
+	if !strings.Contains(err.Error(), "empty Lima configuration") {
+		t.Errorf("error = %q, want it to mention an empty configuration", err)
 	}
 }
 
