@@ -12,6 +12,8 @@ the steps to migrate. See
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-04
+
 ### Fixed
 
 - Removing a key in `config_overrides` now removes it from the configuration
@@ -96,6 +98,7 @@ First release.
 - Windows binaries are published because Lima supports WSL2, but the provider is
   untested there.
 
-[Unreleased]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/guidoiaquinti/terraform-provider-lima/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/guidoiaquinti/terraform-provider-lima/releases/tag/v0.1.0
