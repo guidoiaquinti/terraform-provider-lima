@@ -19,7 +19,7 @@ when dependencies change; `make notices-check` fails the build if it is stale.
 - `github.com/hashicorp/terraform-plugin-framework-validators@v0.19.0`
 - `github.com/hashicorp/terraform-plugin-framework@v1.19.0`
 - `github.com/hashicorp/terraform-plugin-go@v0.31.0`
-- `github.com/hashicorp/terraform-plugin-log@v0.10.0`
+- `github.com/hashicorp/terraform-plugin-log@v0.11.0`
 - `github.com/hashicorp/terraform-registry-address@v0.4.0`
 - `github.com/hashicorp/terraform-svchost@v0.2.1`
 - `github.com/hashicorp/yamux@v0.1.2`
@@ -2359,10 +2359,10 @@ Exhibit B - “Incompatible With Secondary Licenses” Notice
 
 ---
 
-## github.com/hashicorp/terraform-plugin-log@v0.10.0
+## github.com/hashicorp/terraform-plugin-log@v0.11.0
 
 ```
-Copyright (c) 2021 HashiCorp, Inc.
+Copyright IBM Corp. 2021, 2026
 
 Mozilla Public License, version 2.0
 
