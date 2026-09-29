@@ -354,3 +354,36 @@ func TestSanitizeStderrDropsCarriageReturns(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandErrorStripsYAMLSourceExcerpt pins the redaction of the source
+// excerpt `limactl validate` appends to a YAML error. The stderr is verbatim
+// Lima 2.2.0 output apart from the path; the excerpt would otherwise carry raw
+// configuration, credentials included, into diagnostics and DEBUG logs.
+func TestCommandErrorStripsYAMLSourceExcerpt(t *testing.T) {
+	t.Parallel()
+	const canary = "secret-canary-4f2a"
+	stderr := limaLog("fatal", "failed to unmarshal YAML (/tmp/lima.yaml): [3:7] cannot unmarshal string into Go struct field LimaYAML.CPUs of type int\n"+
+		"   1 | images:\n"+
+		"   2 | - location: https://example.com/x.img\n"+
+		">  3 | cpus: "+canary+"\n"+
+		"             ^\n") +
+		// The same excerpt shape arriving outside logrus framing.
+		">  9 | password: " + canary + "\n" +
+		"   10 | token: " + canary + "\n"
+	e := &CommandError{Binary: "limactl", Args: []string{"validate"}, ExitCode: 1, Stderr: stderr}
+
+	for name, got := range map[string]string{
+		"Message": e.Message(),
+		"Details": e.Details(),
+		"Error":   e.Error(),
+	} {
+		if strings.Contains(got, canary) {
+			t.Errorf("%s leaks the source excerpt: %q", name, got)
+		}
+	}
+	// Stripping the excerpt must keep the reason and its position.
+	want := "failed to unmarshal YAML (/tmp/lima.yaml): [3:7] cannot unmarshal string into Go struct field LimaYAML.CPUs of type int"
+	if got := e.Message(); got != want {
+		t.Errorf("Message() = %q, want %q", got, want)
+	}
+}

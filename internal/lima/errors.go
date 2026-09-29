@@ -110,11 +110,14 @@ func SanitizeStderrLines(stderr string) []LogLine {
 			if strings.Contains(raw, "\r") || isProgressNoise(line) {
 				continue
 			}
+			if isSourceExcerpt(line) {
+				continue
+			}
 			out = append(out, LogLine{Message: line})
 			continue
 		}
 		level := m[1]
-		msg := unquoteMessage(m[2])
+		msg := stripSourceExcerpt(unquoteMessage(m[2]))
 		if level == "debug" || level == "trace" {
 			continue
 		}
@@ -165,6 +168,37 @@ func unquoteMessage(s string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// Lima's YAML errors carry an annotated excerpt of the offending document
+// after the reason (observed with `limactl validate`, Lima 2.2.0):
+//
+//	failed to unmarshal YAML (...): [3:7] cannot unmarshal string into ...
+//	   1 | images:
+//	>  3 | cpus: hunter2
+//	             ^
+//
+// The document is the user's configuration, which may hold credentials or
+// provisioning scripts, so excerpt lines never reach a diagnostic or a log.
+// The reason line keeps the line and column, which is enough to find it.
+var sourceExcerptLine = regexp.MustCompile(`^\s*>?\s*\d+\s*\|`)
+
+func isSourceExcerpt(line string) bool {
+	return sourceExcerptLine.MatchString(line) || strings.TrimSpace(line) == "^"
+}
+
+// stripSourceExcerpt removes excerpt lines from a multi-line message.
+func stripSourceExcerpt(msg string) string {
+	if !strings.Contains(msg, "\n") {
+		return msg
+	}
+	kept := make([]string, 0, 1)
+	for line := range strings.SplitSeq(msg, "\n") {
+		if !isSourceExcerpt(line) {
+			kept = append(kept, line)
+		}
+	}
+	return strings.TrimRight(strings.Join(kept, "\n"), "\n \t")
 }
 
 func isProgressNoise(line string) bool {
