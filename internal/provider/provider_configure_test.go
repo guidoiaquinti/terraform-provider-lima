@@ -6,7 +6,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +13,8 @@ import (
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/guidoiaquinti/terraform-provider-lima/internal/testutil"
 )
 
 // provider.Configure is where every user-facing misconfiguration is caught: a
@@ -45,9 +46,7 @@ case "$1" in
   *) exit 0 ;;
 esac
 `, versionOutput)
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing stub limactl: %v", err)
-	}
+	testutil.WriteExecutable(t, path, script)
 	return path
 }
 
