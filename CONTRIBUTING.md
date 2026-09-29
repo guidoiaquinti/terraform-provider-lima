@@ -537,8 +537,9 @@ Two practical points:
 
 - **New dependencies change the notices.** `THIRD-PARTY-NOTICES.md` reproduces
   the licence of every module linked into the shipped binary, which Apache-2.0
-  §4, BSD and MIT all require of a binary redistribution. Run `make notices` and
-  commit the result; `make notices-check` fails CI otherwise.
+  §4, BSD and MIT all require of a binary redistribution. It is generated at
+  release time by a GoReleaser hook and is not committed; `make notices`
+  produces it locally if you want to inspect it.
 
   Please avoid adding a dependency under a copyleft licence. It would not be
   merely a licence-compatibility question — it would change what users of the
