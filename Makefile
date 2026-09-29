@@ -1,5 +1,5 @@
 BINARY      := terraform-provider-lima
-VERSION     ?= 0.1.2-dev
+VERSION     ?= 0.1.3-dev
 GOFLAGS     ?=
 LDFLAGS     := -ldflags "-s -w -X main.version=$(VERSION)"
 HOSTNAME    := registry.terraform.io
