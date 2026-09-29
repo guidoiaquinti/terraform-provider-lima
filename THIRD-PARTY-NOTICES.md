@@ -29,11 +29,11 @@ when dependencies change; `make notices-check` fails the build if it is stale.
 - `github.com/oklog/run@v1.2.0`
 - `github.com/vmihailenco/msgpack/v5@v5.4.1`
 - `github.com/vmihailenco/tagparser/v2@v2.0.0`
-- `golang.org/x/net@v0.56.0`
-- `golang.org/x/sys@v0.46.0`
-- `golang.org/x/text@v0.39.0`
+- `golang.org/x/net@v0.58.0`
+- `golang.org/x/sys@v0.47.0`
+- `golang.org/x/text@v0.41.0`
 - `google.golang.org/genproto/googleapis/rpc@v0.0.0-20260526163538-3dc84a4a5aaa`
-- `google.golang.org/grpc@v1.83.1`
+- `google.golang.org/grpc@v1.83.2`
 - `google.golang.org/protobuf@v1.36.11`
 
 ---
@@ -4161,7 +4161,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## golang.org/x/net@v0.56.0
+## golang.org/x/net@v0.58.0
 
 ```
 Copyright 2009 The Go Authors.
@@ -4195,7 +4195,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## golang.org/x/sys@v0.46.0
+## golang.org/x/sys@v0.47.0
 
 ```
 Copyright 2009 The Go Authors.
@@ -4229,7 +4229,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## golang.org/x/text@v0.39.0
+## golang.org/x/text@v0.41.0
 
 ```
 Copyright 2009 The Go Authors.
@@ -4472,7 +4472,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## google.golang.org/grpc@v1.83.1
+## google.golang.org/grpc@v1.83.2
 
 ```
 
