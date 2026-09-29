@@ -304,4 +304,5 @@ See [`ROADMAP.md`](ROADMAP.md).
 
 [Apache License 2.0](LICENSE). Every source file carries an
 `SPDX-License-Identifier: Apache-2.0` header, and every release archive ships
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) alongside the binary.
+`THIRD-PARTY-NOTICES.md` alongside the binary. It is generated from the module
+graph at release time; run `make notices` to produce it locally.

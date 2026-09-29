@@ -6,6 +6,10 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    # Generated here rather than committed: it is derived from the module
+    # graph, so a committed copy went stale with every dependency bump and
+    # Dependabot cannot regenerate it. The archive step below requires it.
+    - ./scripts/gen-notices.sh
 
 builds:
   - id: terraform-provider-lima

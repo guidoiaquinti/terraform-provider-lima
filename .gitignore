@@ -3,6 +3,8 @@
 /dist/
 coverage.out
 *.test
+# Generated at release time by scripts/gen-notices.sh
+/THIRD-PARTY-NOTICES.md
 
 # Terraform
 .terraform/

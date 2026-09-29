@@ -6,8 +6,26 @@ package testutil
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
+
+// WriteExecutable writes an executable script to path.
+//
+// A plain os.WriteFile is racy under t.Parallel on Linux: a child forked by
+// another test between this open and close inherits the write descriptor until
+// it execs, and exec'ing the script meanwhile fails with ETXTBSY ("text file
+// busy"; golang/go#22315). os/exec forks under a write lock on
+// syscall.ForkLock, so holding the read lock across the write keeps any fork
+// from seeing the descriptor.
+func WriteExecutable(t *testing.T, path, script string) {
+	t.Helper()
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+}
 
 // StubBinary writes an executable no-op script and returns its path.
 //
@@ -19,10 +37,7 @@ func StubBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "limactl")
-	script := "#!/bin/sh\nexit 0\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing stub binary: %v", err)
-	}
+	WriteExecutable(t, path, "#!/bin/sh\nexit 0\n")
 	return path
 }
 
