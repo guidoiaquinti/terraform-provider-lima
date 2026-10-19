@@ -127,7 +127,7 @@ jobs:
           cache: false
 
       - name: Validate the GoReleaser configuration
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           # Must match release.yml. This job exists to rehearse the release, and
           # a rehearsal on a different version of the tool can pass while the
@@ -140,7 +140,7 @@ jobs:
       # nothing can be released from a pull request. It still cross-compiles
       # every goos/goarch pair in the config.
       - name: Build every shipped target
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: v2.17.1
           args: build --snapshot --clean
