@@ -100,7 +100,7 @@ Unit tests need no Lima installation and create no VMs.
 
 What you need:
 
-- Go 1.26.5+
+- Go 1.27.3+
 - [Lima](https://lima-vm.io/docs/installation/) 2.0 or newer with `limactl` on
   `PATH` — only for the acceptance tests and the `TestReal*` unit tests
 - Terraform 1.0+ or OpenTofu 1.6+ to exercise a build against a real

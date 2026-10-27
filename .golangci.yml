@@ -26,6 +26,7 @@ linters:
 
     # Superseded linters. Their replacements remain enabled unless listed in
     # the policy section below.
+    - exhaustruct
     - gomodguard
     - wsl
 
@@ -36,7 +37,7 @@ linters:
     - depguard
     - dupl
     - err113
-    - exhaustruct
+    - exhaustruct_v5
     - funcorder
     - funlen
     - gocognit

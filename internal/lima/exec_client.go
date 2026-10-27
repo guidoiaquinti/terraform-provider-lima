@@ -47,8 +47,7 @@ func (execRunner) Run(ctx context.Context, binary string, args []string, env []s
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			exitCode = ee.ExitCode()
 			err = nil
 		}

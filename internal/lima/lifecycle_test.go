@@ -737,8 +737,7 @@ func TestServiceResizeEditFailureLeavesInstanceStopped(t *testing.T) {
 		t.Fatal("Resize succeeded, want an edit failure")
 	}
 
-	var restartErr *lima.RestartAfterEditError
-	if errors.As(err, &restartErr) {
+	if _, ok := errors.AsType[*lima.RestartAfterEditError](err); ok {
 		t.Error("an edit failure must not be reported as a restart failure")
 	}
 
