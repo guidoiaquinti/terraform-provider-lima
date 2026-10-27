@@ -12,6 +12,16 @@ the steps to migrate. See
 
 ## [Unreleased]
 
+### Security
+
+- Releases are now built with Go 1.27.3 (v0.1.2 used 1.26.5) and
+  `golang.org/x/net` v0.61.0 (v0.1.2 shipped v0.56.0). This picks up fixes for
+  the HTTP/2 advisories GO-2026-6603, GO-2026-6611, GO-2026-6612 and
+  GO-2026-6617, and for standard library advisories in `net/http`,
+  `net/textproto`, `crypto/tls`, `crypto/x509` and `encoding/asn1`, all of
+  which govulncheck reports as reachable from the provider. Building from
+  source now needs Go 1.27.3 or newer.
+
 ## [0.1.2] - 2026-08-04
 
 ### Fixed

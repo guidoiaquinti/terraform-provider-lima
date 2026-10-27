@@ -5,10 +5,25 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+    allow:
+      - dependency-type: all
+
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
     groups:
       terraform-plugin:
         patterns:
           - "github.com/hashicorp/terraform-plugin-*"
+
+      go-modules:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /

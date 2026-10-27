@@ -771,8 +771,7 @@ func (r *instanceResource) Update(ctx context.Context, req resource.UpdateReques
 		// bringing the instance back up did not. State has to say so, or the next
 		// plan proposes applying resources the instance already has, and anyone
 		// reading state sees values that are no longer true.
-		var restartErr *lima.RestartAfterEditError
-		if errors.As(err, &restartErr) {
+		if _, ok := errors.AsType[*lima.RestartAfterEditError](err); ok {
 			r.recordAppliedResize(ctx, resp, &plan, planLists, name, protection)
 			return
 		}
@@ -1184,8 +1183,7 @@ func (r *instanceResource) addResizeError(resp *resource.UpdateResponse, name st
 	// The instance was reconfigured but could not be restarted. This is the
 	// one case where the user must know the change *did* apply, or they may
 	// wrongly assume nothing happened and reapply something different.
-	var restartErr *lima.RestartAfterEditError
-	if errors.As(err, &restartErr) {
+	if restartErr, ok := errors.AsType[*lima.RestartAfterEditError](err); ok {
 		resp.Diagnostics.AddError(
 			fmt.Sprintf("Lima instance %q was reconfigured but could not be restarted", name),
 			fmt.Sprintf("%s\n\n"+
