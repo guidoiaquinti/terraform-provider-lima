@@ -62,7 +62,7 @@ jobs:
           cache: true
 
       - name: Initialise CodeQL
-        uses: github/codeql-action/init@bce182f857edf1feab116e9795a3393d21977282 # v4
+        uses: github/codeql-action/init@fbfa9f37476c0024508d051f3c34fcca3366b0e2 # v4
         with:
           languages: go
           # security-extended adds the lower-precision security queries. Worth
