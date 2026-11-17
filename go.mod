@@ -1,6 +1,6 @@
 module github.com/guidoiaquinti/terraform-provider-lima
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/goccy/go-yaml v1.19.2
